@@ -2,6 +2,7 @@ import subprocess
 import os
 import sys
 import time
+import socket
 
 # Get absolute paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -15,9 +16,34 @@ PYTHON_EXE = os.path.join(BACKEND_DIR, "env", "Scripts", "python.exe")
 # Define flags to create new console windows on Windows
 CREATE_NEW_CONSOLE = 0x00000010
 
+def get_local_ip():
+    try:
+        # Create a dummy socket to detect the preferred local IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "127.0.0.1"
+
 def start_servers():
     print("🚀 Starting Unified Developer Environment...")
     print(f"📂 Base Directory: {BASE_DIR}")
+    
+    local_ip = get_local_ip()
+
+    # Check for Python Environment
+    if not os.path.exists(PYTHON_EXE):
+        print(f"❌ Error: Python virtual environment not found at {PYTHON_EXE}")
+        print("💡 Please create the environment: cd backend && python -m venv env")
+        return
+
+    # Check for Node Modules
+    if not os.path.exists(os.path.join(FRONTEND_DIR, "node_modules")):
+        print("⚠️ Warning: 'node_modules' not found in frontend.")
+        print("💡 Please run: cd frontend && npm install")
+        # We continue because they might have fixed it or it might be a false negative
     
     # 1. Sync Database (Create tables automatically if missing)
     print("📂 Syncing Database (makemigrations & migrate)...")
@@ -46,21 +72,23 @@ def start_servers():
     # Slight delay to ensure ports don't clash or just for visual clarity
     time.sleep(1)
 
-    # Start Frontend
+    # 4. Start Frontend
     print("⏳ Launching Frontend (Vite on Port 3000)...")
+    # Using 'cmd /k' keeps the window open so you can see the error if npm fails.
+    # shell=True is more reliable for resolving 'npm' on Windows paths.
     frontend = subprocess.Popen(
-        ["cmd", "/c", "npm", "run", "dev"],
+        "cmd /k npm run dev",
         cwd=FRONTEND_DIR,
-        creationflags=CREATE_NEW_CONSOLE
+        creationflags=CREATE_NEW_CONSOLE,
+        shell=True
     )
 
     print("\n✅ Both servers are starting in NEW windows.")
-    print("- Backend: https://localhost:8000")
-    print("- Frontend: https://localhost:3000 (or https://192.168.0.7:3000)")
+    print(f"- Backend:  https://localhost:8000 (or https://{local_ip}:8000)")
+    print(f"- Frontend: https://localhost:3000 (or https://{local_ip}:3000)")
     print("\nKeep this window open to keep the processes managed, or close it after they start.")
     
     # Keep the script alive so the processes don't orphaned if the user wants management
-    # But usually, with CREATE_NEW_CONSOLE, they are independent windows.
     print("\nPress Ctrl+C here if you want to exit this manager script.")
     try:
         while True:
