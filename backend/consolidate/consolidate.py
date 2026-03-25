@@ -12,12 +12,10 @@ def validate_excel_files(file_paths):
     - Exactly 1 ANALYSIS sheet
     - Minimum 1 PIVOT-XXX sheet
     - Minimum 1 XNS-XXX sheet
-    Returns (True, "", pivot_count, xns_count) if valid, else (False, "Error Message", 0, 0)
     """
     pythoncom.CoInitialize()
     excel = None
     try:
-        # Use a single Excel instance for validation to save time
         excel = win32.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
@@ -34,10 +32,10 @@ def validate_excel_files(file_paths):
             wb.Close(False)
             
             analysis_count = sheet_names.count("ANALYSIS")
-            pivot_count = sum(1 for name in sheet_names if name.startswith("PIVOT-"))
-            xns_count = sum(1 for name in sheet_names if name.startswith("XNS-"))
+            # Lenient count for validation too
+            pivot_count = sum(1 for name in sheet_names if "PIVOT" in name)
+            xns_count = sum(1 for name in sheet_names if "XNS" in name)
             
-            # Keep track for the return (useful if only 1 file)
             last_pivot_count = pivot_count
             last_xns_count = xns_count
 
@@ -46,9 +44,9 @@ def validate_excel_files(file_paths):
             if analysis_count != 1:
                 errors.append(f"must have exactly 1 'ANALYSIS' sheet (found {analysis_count})")
             if pivot_count < 1:
-                errors.append("must have at least 1 'PIVOT-' sheet")
+                errors.append("must have at least 1 'PIVOT' sheet")
             if xns_count < 1:
-                errors.append("must have at least 1 'XNS-' sheet")
+                errors.append("must have at least 1 'XNS' sheet")
             
             if errors:
                 return False, f"File '{filename}' is invalid: {', '.join(errors)}.", 0, 0
@@ -83,12 +81,13 @@ def find_analysis_last_row(sheet):
     return None
 
 def find_main_file(excel, file_paths):
-    """Identifies the file with the most PIVOT and XNS sheets to act as the base for consolidation."""
+    """Identifies the file with the most PIVOT and XNS sheets to act as the base."""
     sheet_counts = []
     for path in file_paths:
         try:
             wb = excel.Workbooks.Open(path)
-            count = sum(1 for s in wb.Sheets if s.Name.startswith(("XNS", "PIVOT")))
+            # Lenient count
+            count = sum(1 for s in wb.Sheets if "XNS" in s.Name.upper() or "PIVOT" in s.Name.upper())
             sheet_counts.append((path, count))
             wb.Close(False)
         except Exception as e:
@@ -118,10 +117,8 @@ def merge_excel_files(file_paths):
         excel.DisplayAlerts = False
         excel.ScreenUpdating = False
         excel.EnableEvents = False
-        try:
-            excel.Calculation = -4135  # xlCalculationManual
-        except:
-            pass
+        try: excel.Calculation = -4135
+        except: pass
 
         # 1. Identify main file
         main_path, other_paths = find_main_file(excel, file_paths)
@@ -131,10 +128,8 @@ def merge_excel_files(file_paths):
         print(f"Base file: {os.path.basename(main_path)}")
         main_wb = excel.Workbooks.Open(main_path)
         main_analysis = None
-        try:
-            main_analysis = main_wb.Sheets("ANALYSIS")
-        except:
-            print("Warning: main file has no ANALYSIS sheet.")
+        try: main_analysis = main_wb.Sheets("ANALYSIS")
+        except: pass
 
         # 2. Merge other files
         for other_path in other_paths:
@@ -156,48 +151,52 @@ def merge_excel_files(file_paths):
                     except Exception as e:
                         print(f"Could not merge ANALYSIS from {os.path.basename(other_path)}: {e}")
 
-                # Copy PIVOT & XNS Sheets in one pass
-                main_sheet_names = {s.Name for s in main_wb.Sheets}
+                # ⚠️ LENTIENT SHEET COPYING: Copy all PIVOT/XNS sheets regardless of prefix
+                main_sheet_names = {s.Name.upper() for s in main_wb.Sheets}
                 insert_pos = main_wb.Sheets("ANALYSIS").Index + 1 if main_analysis else 1
                 
                 for sheet in other_wb.Sheets:
-                    if sheet.Name.startswith(("PIVOT", "XNS")):
-                        if sheet.Name not in main_sheet_names:
+                    sn_upper = sheet.Name.upper()
+                    if "PIVOT" in sn_upper or "XNS" in sn_upper:
+                        if sn_upper not in main_sheet_names:
                             sheet.Copy(Before=main_wb.Sheets(insert_pos))
-                            main_sheet_names.add(sheet.Name)
+                            main_sheet_names.add(sn_upper)
                             insert_pos += 1
             finally:
                 other_wb.Close(False)
 
-        # 3. Update Pivot Tables Data Source to remove external links
+        # 3. Update Pivot Tables Data Source
         for ws in main_wb.Sheets:
-            if ws.Name.startswith("PIVOT"):
-                xns_sheet_name = ws.Name.replace("PIVOT", "XNS", 1)
-                try:
-                    new_source = f"'{xns_sheet_name}'!$B:$I"
-                    
-                    for pt in ws.PivotTables():
-                        try:
-                            # 1 = xlDatabase (Data from Excel range)
-                            new_cache = main_wb.PivotCaches().Create(SourceType=1, SourceData=new_source)
-                            pt.ChangePivotCache(new_cache)
-                            pt.RefreshTable()
-                        except Exception as pt_e:
-                            print(f"Failed to update PivotTable in {ws.Name}: {pt_e}")
-                except Exception as e:
-                    print(f"Could not find XNS sheet {xns_sheet_name} or failed range calculation: {e}")
+            if "PIVOT" in ws.Name.upper():
+                # Find companion XNS sheet by suffix match
+                pivot_suffix = ws.Name.upper().split("PIVOT")[-1].strip("- ")
+                xns_sheet = None
+                for sh in main_wb.Sheets:
+                    if "XNS" in sh.Name.upper() and pivot_suffix in sh.Name.upper():
+                        xns_sheet = sh
+                        break
+                
+                if xns_sheet:
+                    try:
+                        new_source = f"'{xns_sheet.Name}'!$B:$I"
+                        for pt in ws.PivotTables():
+                            try:
+                                new_cache = main_wb.PivotCaches().Create(SourceType=1, SourceData=new_source)
+                                pt.ChangePivotCache(new_cache)
+                                pt.RefreshTable()
+                            except Exception as pt_e:
+                                print(f"Failed to update PivotTable in {ws.Name}: {pt_e}")
+                    except Exception as e:
+                        print(f"Failed to update range for {ws.Name}: {e}")
 
         # 4. Save result
         folder = os.path.dirname(main_path)
         base = os.path.splitext(os.path.basename(main_path))[0]
         new_file = os.path.join(folder, f"{base}-CONSOLIDATED.xlsx")
-        new_file = os.path.normpath(new_file)
         
         if os.path.exists(new_file):
-            try:
-                os.remove(new_file)
-            except:
-                pass
+            try: os.remove(new_file)
+            except: pass
 
         main_wb.SaveAs(new_file, FileFormat=51)
         print(f"Consolidation complete: {new_file}")
@@ -209,19 +208,15 @@ def merge_excel_files(file_paths):
         return None
     finally:
         if main_wb:
-            try:
-                main_wb.Close(False)
-            except:
-                pass
+            try: main_wb.Close(False)
+            except: pass
         if excel:
             try:
-                excel.Calculation = -4105 # xlCalculationAutomatic
+                excel.Calculation = -4105
                 excel.EnableEvents = True
                 excel.Quit()
-            except:
-                pass
+            except: pass
         pythoncom.CoUninitialize()
 
 if __name__ == "__main__":
-    # Removed raw file paths for production.
     pass

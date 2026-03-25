@@ -469,6 +469,8 @@ def save_working_files_with_styles(working_data_storage, output_dir_name="Matche
 
             target_ws.row_dimensions[1].height = 20
 
+            acc_name = acc_name.replace("\\", "_").replace("/", "_")
+
             output_filename = f"{acc_name}-{sheet_name}-WORKING-MERGED.xlsx"
             output_path     = base_dir / output_filename
             print(f"  Saving to {output_filename}...")
