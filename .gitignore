@@ -32,9 +32,6 @@ ENV/
 # ============================================================
 # Node / React / Vite
 # ============================================================
-node_modules/
-frontend/dist/
-frontend/build/
 frontend/.cache/
 .DS_Store
 *.local
