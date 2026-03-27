@@ -7,6 +7,7 @@ __pycache__/
 *.pyd
 *.egg
 *.egg-info/
+dist/
 build/
 .eggs/
 *.spec
@@ -31,6 +32,9 @@ ENV/
 # ============================================================
 # Node / React / Vite
 # ============================================================
+node_modules/
+frontend/dist/
+frontend/build/
 frontend/.cache/
 .DS_Store
 *.local
@@ -39,14 +43,10 @@ frontend/.cache/
 # Project-specific
 # ============================================================
 # Google service account key
-*.json
-!package.json
-!package-lock.json
 
 # Temp consolidation directory
 backend/temp_consolidate/
 robust-shadow-471605-k1-6152c9ae90ff.json
-automation_processor.py
 
 # Uploaded / processed Excel files
 *.xlsx
