@@ -7,7 +7,6 @@ __pycache__/
 *.pyd
 *.egg
 *.egg-info/
-dist/
 build/
 .eggs/
 *.spec
