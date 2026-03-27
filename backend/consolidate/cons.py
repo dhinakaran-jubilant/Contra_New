@@ -320,8 +320,8 @@ def create_cons_sheet(file_path):
                 excel.DisplayAlerts = True
             except: pass
             
-            # Skip specialized sheets if fewer than 2 accounts found for them
-            if s_name != "CONS" and len(pivot_list) < 2:
+            # Skip specialized sheets if fewer than 1 account found for them
+            if s_name != "CONS" and len(pivot_list) < 1:
                 continue
 
             ws = wb.Worksheets.Add(After=wb.Worksheets(wb.Worksheets.Count))

@@ -26,7 +26,7 @@ def col_letter(col_num):
         result = chr(65 + rem) + result
     return result
 
-def process_bank_fin_block(master_ws, temp_ws, sheet_name):
+def process_bank_fin_block(master_ws, temp_ws, sheet_name, global_months=None):
     """Processes detail blocks for specialized sheets like BANK FIN, PVT FIN, or RETURN."""
     try:
         data = temp_ws.UsedRange.Value
@@ -45,6 +45,7 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name):
     date_idx = col_map.get("DATE")
     dr_idx = col_map.get("DR")
     cr_idx = col_map.get("CR")
+    month_idx = col_map.get("MONTH")
 
     grouped = defaultdict(list)
     if category_idx is not None:
@@ -81,14 +82,55 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name):
     for category in sorted(grouped.keys()):
         items = grouped[category]
         
-        # 🚀 Fix: Sort items by Date within the category
-        if date_idx is not None:
-            try:
-                # Excel dates can be datetime objects or numbers. 
-                # We use a helper lambda that handles None/invalid values safely.
-                items.sort(key=lambda x: (x[date_idx] if (len(x) > date_idx and x[date_idx] is not None) else datetime.min))
-            except Exception as sort_e:
-                print(f"  [Sort Warning] Could not sort items in {category}: {sort_e}")
+        ordered_items = []
+        missing_month_info = [] # stores tuples of (index_in_ordered, global_month_index)
+        
+        first_cr_global_idx = -1
+        
+        if global_months and month_idx is not None:
+            # Find the chronological index of the first CR value
+            cr_idxs = []
+            for r in items:
+                if cr_idx is not None and len(r) > cr_idx and to_number(r[cr_idx]) > 0:
+                    m_val = str(r[month_idx]).strip().upper() if len(r) > month_idx and r[month_idx] is not None else ""
+                    if m_val in global_months:
+                        cr_idxs.append(global_months.index(m_val))
+            if cr_idxs:
+                first_cr_global_idx = min(cr_idxs)
+                
+            items_by_month = defaultdict(list)
+            for r in items:
+                m_val = str(r[month_idx]).strip() if len(r) > month_idx and r[month_idx] is not None else ""
+                items_by_month[m_val.upper()].append(r)
+                
+            for global_idx, m in enumerate(global_months):
+                m_key = m.upper().strip()
+                if m_key in items_by_month:
+                    m_items = items_by_month.pop(m_key)
+                    if date_idx is not None:
+                        try:
+                            m_items.sort(key=lambda x: (x[date_idx] if (len(x) > date_idx and x[date_idx] is not None) else datetime.min))
+                        except: pass
+                    ordered_items.extend(m_items)
+                else:
+                    dummy = ["" for _ in range(len(headers))]
+                    dummy[month_idx] = m
+                    ordered_items.append(dummy)
+                    missing_month_info.append((len(ordered_items) - 1, global_idx))
+                    
+            for m_key, m_items in items_by_month.items():
+                if date_idx is not None:
+                    try:
+                        m_items.sort(key=lambda x: (x[date_idx] if (len(x) > date_idx and x[date_idx] is not None) else datetime.min))
+                    except: pass
+                ordered_items.extend(m_items)
+        else:
+            ordered_items = items[:]
+            if date_idx is not None:
+                try:
+                    ordered_items.sort(key=lambda x: (x[date_idx] if (len(x) > date_idx and x[date_idx] is not None) else datetime.min))
+                except Exception as sort_e:
+                    print(f"  [Sort Warning] Could not sort items in {category}: {sort_e}")
 
         # Write Category Header
         header_range = master_ws.Range(master_ws.Cells(current_row, 1), master_ws.Cells(current_row, len(headers)))
@@ -100,9 +142,33 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name):
 
         data_start_row = current_row
         # Bulk write items for this category
-        data_range = master_ws.Range(master_ws.Cells(current_row, 1), master_ws.Cells(current_row + len(items) - 1, len(headers)))
-        data_range.Value = items
-        current_row += len(items)
+        data_range = master_ws.Range(master_ws.Cells(current_row, 1), master_ws.Cells(current_row + len(ordered_items) - 1, len(headers)))
+        data_range.Value = ordered_items
+        
+        # Color missing month cells and make month text bold
+        for offset, global_idx in missing_month_info:
+            row_in_sheet = current_row + offset
+            
+            # Make the Month name bold
+            if month_idx is not None:
+                master_ws.Cells(row_in_sheet, month_idx + 1).Font.Bold = True
+                
+            # If a CR value exists, only highlight the DR cell for missing months AFTER it.
+            # Otherwise, highlight the DR cell for ALL missing months.
+            should_highlight_dr = False
+            if first_cr_global_idx != -1:
+                # Highlight if chronological month is logically strictly AFTER the CR value
+                if global_idx > first_cr_global_idx:
+                    should_highlight_dr = True
+            else:
+                should_highlight_dr = True
+                
+            if should_highlight_dr and dr_idx is not None:
+                cell = master_ws.Cells(row_in_sheet, dr_idx + 1)
+                cell.Interior.Color = 255
+                cell.Font.Bold = True
+
+        current_row += len(ordered_items)
         data_end_row = current_row - 1
 
         # Write Total for this category
@@ -167,6 +233,23 @@ def create_chart_from_pivot(file_path):
 
         # 2. Collect pivot sheet names
         pivot_sheet_names = [ws.Name for ws in wb.Worksheets if "PIVOT" in ws.Name.upper()]
+
+        # 2.5 Extract Global Months from the first Pivot to ensure full timeline coverage
+        global_months = []
+        if pivot_sheet_names:
+            try:
+                pt_ws = wb.Worksheets(pivot_sheet_names[0])
+                pt = pt_ws.PivotTables(1)
+                m_field = pt.PivotFields("MONTH")
+                m_items = []
+                for idx in range(1, m_field.PivotItems().Count + 1):
+                    item = m_field.PivotItems(idx)
+                    if item.Visible and "(blank)" not in str(item.Name).lower():
+                        m_items.append((item.Position, str(item.Name)))
+                m_items.sort(key=lambda x: x[0])
+                global_months = [m[1] for m in m_items]
+            except Exception as e:
+                print(f"  [Global Months Error] {e}")
 
         # 3. Iterate Pivot Sheets
         for pivot_name in pivot_sheet_names:
@@ -291,7 +374,7 @@ def create_chart_from_pivot(file_path):
                     master_ws = master_sheets[chart_type]
 
                 if chart_type in {'BANK FIN', 'PVT FIN'}:
-                    process_bank_fin_block(master_ws, temp_ws, match_suffix)
+                    process_bank_fin_block(master_ws, temp_ws, match_suffix, global_months)
                 else:
                     # Regular Chart Detail Copy
                     try:
