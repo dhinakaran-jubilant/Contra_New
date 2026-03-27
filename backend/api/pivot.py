@@ -69,26 +69,28 @@ def _color_row(sheet, row_abs: int, start_col: int, col_count: int, color: int) 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def create_pivot(file_path, sheet_name, limit=None) -> None:
+def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
     """
     Open *file_path* in Excel via COM automation, create / refresh a pivot
     table on a sheet named after *sheet_name* (XNS→PIVOT), apply colours
     and formatting, then save and close.
+    If *excel* is provided, use that instance and do not quit it.
     """
-    excel = None
-    wb    = None
+    wb = None
+    own_excel = False
 
     try:
-        pythoncom.CoInitialize()
-
-        excel = win32.DispatchEx("Excel.Application")
-        excel.Visible       = False
-        excel.DisplayAlerts = False
-        excel.ScreenUpdating = False
-        try:
-            excel.Calculation = -4135   # xlCalculationManual
-        except Exception:
-            pass
+        if excel is None:
+            pythoncom.CoInitialize()
+            excel = win32.DispatchEx("Excel.Application")
+            excel.Visible       = False
+            excel.DisplayAlerts = False
+            excel.ScreenUpdating = False
+            own_excel = True
+            try:
+                excel.Calculation = -4135   # xlCalculationManual
+            except Exception:
+                pass
 
         file_path = str(file_path).replace('\\', '/').strip()
         wb = excel.Workbooks.Open(file_path)
@@ -181,34 +183,41 @@ def create_pivot(file_path, sheet_name, limit=None) -> None:
         pivot_sheet.Columns(start_col + col_count - 2).ColumnWidth = 13
         pivot_sheet.Columns(start_col + col_count - 1).ColumnWidth = 13
 
-        # ── Single pass over TYPE column: totals (red font) + row colours ─
-        type_values = pivot_sheet.Range(
-            pivot_sheet.Cells(start_row, start_col),
-            pivot_sheet.Cells(start_row + row_count - 1, start_col),
-        ).Value
-
+        # ── Grouped row coloring for performance ──────────────────────
+        type_values = pivot_range.Columns(1).Value
         current_type = None
-        for i, row in enumerate(type_values):
-            value = row[0]
+        group_start = -1
+
+        for i, row_data in enumerate(type_values):
+            val = row_data[0]
             abs_row = start_row + i
 
-            if value:
-                value_str    = str(value)
-                current_type = value_str.strip().upper()
-
-                # Mark subtotals red
-                if "Total" in value_str and "Grand" not in value_str:
+            if val:
+                val_str = str(val)
+                new_type = val_str.strip().upper()
+                
+                # Apply previous group if type changed
+                if group_start != -1 and new_type != current_type:
+                    _color_row_range(pivot_sheet, group_start, abs_row - 1, start_col + 1, col_count - 1, current_type)
+                    group_start = -1
+                
+                current_type = new_type
+                if "TOTAL" not in current_type:
+                    group_start = abs_row
+                
+                # Subtotals are still colored individually for font
+                if "Total" in val_str and "Grand" not in val_str:
                     pivot_sheet.Range(
                         pivot_sheet.Cells(abs_row, start_col),
                         pivot_sheet.Cells(abs_row, start_col + col_count - 1),
-                    ).Font.Color = 255   # Red
-
-            # Colour category rows (all but totals)
-            if current_type and "TOTAL" not in current_type and current_type in TYPE_COLOURS:
-                pivot_sheet.Range(
-                    pivot_sheet.Cells(abs_row, start_col + 1),
-                    pivot_sheet.Cells(abs_row, start_col + col_count - 1),
-                ).Interior.Color = hex_to_excel_color(TYPE_COLOURS[current_type])
+                    ).Font.Color = 255
+            else:
+                # Still in the same group?
+                pass
+        
+        # Final group
+        if group_start != -1:
+            _color_row_range(pivot_sheet, group_start, start_row + row_count - 1, start_col + 1, col_count - 1, current_type)
 
         # ── Header rows + Grand Total row background ──────────────────────
         for i in range(3):
@@ -241,10 +250,22 @@ def create_pivot(file_path, sheet_name, limit=None) -> None:
 
     finally:
         if wb:
-            wb.Close(SaveChanges=True)
-        if excel:
+            try: wb.Close(SaveChanges=True)
+            except: pass
+        if own_excel and excel:
             try:
                 excel.Calculation = -4105   # xlCalculationAutomatic
             except Exception:
                 pass
-            excel.Quit()
+            try: excel.Quit()
+            except: pass
+            pythoncom.CoUninitialize()
+
+def _color_row_range(sheet, row_start, row_end, col_start, col_end, type_name):
+    """Fill a range of rows with the color mapped to type_name."""
+    if type_name in TYPE_COLOURS:
+        color = hex_to_excel_color(TYPE_COLOURS[type_name])
+        sheet.Range(
+            sheet.Cells(row_start, col_start),
+            sheet.Cells(row_end, col_end)
+        ).Interior.Color = color

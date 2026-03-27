@@ -208,7 +208,7 @@ def save_matched_with_styles(
 
         safe_name    = _safe_name_from_key(key)
         acc_name     = acc_name_storage[key]
-        safe_acc     = acc_name.replace("/", "_").replace(",", "")
+        safe_acc     = helpers.sanitize_filename(acc_name)
 
         download_path = helpers.get_downloads()
         base_dir      = download_path / config.PROCESSED_DIR

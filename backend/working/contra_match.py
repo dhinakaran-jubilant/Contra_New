@@ -3,6 +3,7 @@ from api.regex_pattern import extract_imps
 from api.inb_sis import infer_transfer_type
 from api.compare_logic import find_imps_match, find_self_match, find_etxn_match, find_acc_num_match
 from api.categorize_full import categorize_type
+from api.spacy_normalize import normalize_name
 from openpyxl.styles import Font, PatternFill, Border, Alignment
 from openpyxl.utils import get_column_letter
 from copy import copy
@@ -140,6 +141,25 @@ def compare_all_files(software_data_storage, software_acc_name_storage,
 
     file_used_indices = {f['sheet_name']: set() for f in all_files}
 
+    # ── 1. Pre-process all files & Build lookups ONCE ─────────────────────────
+    print(f"🛠️ Pre-processing {len(all_files)} files...")
+    for f_info in all_files:
+        sheet = f_info['sheet_name']
+        bank  = helpers.extract_bank_name_from_sheet(sheet)
+        df    = _preprocess_df(f_info['df'], bank, f_info['file_type'])
+        f_info['df'] = df
+        
+        # Pre-build lookups for both directions
+        f_info['lookup_dr'] = _build_lookup_by_date(df, "DR_val")
+        f_info['lookup_cr'] = _build_lookup_by_date(df, "CR_val")
+        
+        # Pre-calculate account tokens for name matching
+        try:
+            from api.spacy_normalize import normalize_name
+            f_info['acc_tokens'] = normalize_name(f_info['acc_name'])
+        except ImportError:
+            f_info['acc_tokens'] = []
+
     # Dispatch map: logic → find_*_match function
     _LOGIC_FN = {
         'imps':    find_imps_match,
@@ -248,16 +268,13 @@ def compare_all_files(software_data_storage, software_acc_name_storage,
 
         for i, file1_info in enumerate(all_files):
             sheet1 = file1_info['sheet_name']
-            bank1  = helpers.extract_bank_name_from_sheet(sheet1)
-            file1_info['df'] = _preprocess_df(file1_info['df'], bank1, file1_info['file_type'])
+            df1    = file1_info['df']
 
             for file2_info in all_files[i + 1:]:
                 sheet2 = file2_info['sheet_name']
-                bank2  = helpers.extract_bank_name_from_sheet(sheet2)
-                file2_info['df'] = _preprocess_df(file2_info['df'], bank2, file2_info['file_type'])
+                df2    = file2_info['df']
 
-                print(f"\nComparing: {sheet1} ({file1_info['file_type']}) vs "
-                      f"{sheet2} ({file2_info['file_type']})")
+                print(f"   Comparing: {sheet1} vs {sheet2}")
 
                 if file1_info['file_type'] == file2_info['file_type'] == 'software':
                     cmp_type = 'software_vs_software'
@@ -266,10 +283,11 @@ def compare_all_files(software_data_storage, software_acc_name_storage,
                 else:
                     cmp_type = 'software_vs_working'
 
-                df1 = file1_info['df']
-                df2 = file2_info['df']
-                lookup_dr2 = _build_lookup_by_date(df2, "DR_val")
-                lookup_cr2 = _build_lookup_by_date(df2, "CR_val")
+                # Use pre-built lookups
+                lookup_dr2 = file2_info['lookup_dr']
+                lookup_cr2 = file2_info['lookup_cr']
+                lookup_dr1 = file1_info['lookup_dr']
+                lookup_cr1 = file1_info['lookup_cr']
 
                 def _process_comparison(df_a, lookup_b, amount_col_a, amount_col_b,
                                         info_a, info_b, sheet_a, sheet_b):
@@ -428,27 +446,27 @@ def save_working_files_with_styles(working_data_storage, output_dir_name="Matche
             num_columns = len(df_columns)
             print(f"  Writing {len(updated_df)} records with original styles...")
 
-            # Header row
+            # Capture templates
+            df_columns = list(updated_df.columns)
+            
+            # Header row (Row 1)
             for ci, col_name in enumerate(df_columns, 1):
                 cell = target_ws.cell(row=1, column=ci, value=col_name)
                 if ci in header_fmt:
                     _apply_cell_fmt(cell, header_fmt[ci])
                 else:
-                    cell.font      = Font(bold=True, size=11)
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                    cell.font = Font(bold=True)
+                    cell.alignment = Alignment(horizontal='center')
 
-            # Data rows
+            # Data rows (starting Row 2)
+            print(f"  Writing {len(updated_df)} data rows...")
             for ri, row_data in enumerate(updated_df.itertuples(index=False), 2):
                 for ci, value in enumerate(row_data, 1):
-                    if ci > num_columns:
-                        continue
-                    cell     = target_ws.cell(row=ri, column=ci, value=value)
-                    col_name = df_columns[ci - 1]
+                    cell = target_ws.cell(row=ri, column=ci, value=value)
+                    col_name = df_columns[ci-1]
                     if ci in data_row_fmt:
                         _apply_cell_fmt(cell, data_row_fmt[ci])
-                        cell.number_format = _get_number_fmt(
-                            col_name, value, data_row_fmt[ci].get('number_format', 'General')
-                        )
+                        cell.number_format = _get_number_fmt(col_name, value, data_row_fmt[ci].get('number_format', 'General'))
                     else:
                         cell.number_format = _get_number_fmt(col_name, value)
 
@@ -469,9 +487,10 @@ def save_working_files_with_styles(working_data_storage, output_dir_name="Matche
 
             target_ws.row_dimensions[1].height = 20
 
-            acc_name = acc_name.replace("\\", "_").replace("/", "_")
+            # Sanitize filename to prevent OS path errors (e.g. M/S. -> M_S.)
+            safe_acc = helpers.sanitize_filename(acc_name)
 
-            output_filename = f"{acc_name}-{sheet_name}-WORKING-MERGED.xlsx"
+            output_filename = f"{safe_acc}-{sheet_name}-WORKING-MERGED.xlsx"
             output_path     = base_dir / output_filename
             print(f"  Saving to {output_filename}...")
             wb.save(output_path)

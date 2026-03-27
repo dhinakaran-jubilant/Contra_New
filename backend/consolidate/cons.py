@@ -29,35 +29,54 @@ def get_multiple_sheet_name(df):
     return account_details
 
 def get_months_from_xns(wb):
-    """Extracts unique months from all XNS sheets to establish the timeline."""
+    """
+    Extracts unique months from all XNS sheets to establish the timeline.
+    Optimized to read the entire UsedRange at once.
+    """
     months = set()
     for sheet in wb.Worksheets:
         name = sheet.Name
-        if name.startswith("XNS"):
-            try:
-                last_row = sheet.Cells(sheet.Rows.Count, 2).End(-4162).Row  # xlUp
-                if last_row < 2:
-                    continue
-                
-                # Read column B (Date) in bulk
-                data = sheet.Range(f"B2:B{last_row}").Value
-                if data is None:
-                    continue
-                if not isinstance(data, (tuple, list)):
-                    data = ((data,),)
+        if not name.upper().startswith("XNS"):
+            continue
 
-                for row in data:
-                    dt = row[0] if isinstance(row, (tuple, list)) else row
+        try:
+            # 🚀 Bulk Read: Get the entire used data at once
+            data = sheet.UsedRange.Value
+            if not data or len(data) < 2:
+                continue
+
+            # Identify the Date column (usually B, which is index 1)
+            # We'll check the first 5 rows for a 'DATE' header if possible, 
+            # otherwise assume column B.
+            date_col_idx = 1
+            for r_idx in range(min(5, len(data))):
+                row = data[r_idx]
+                if any("DATE" in str(cell).upper() for cell in row if cell):
+                    for idx, cell in enumerate(row):
+                        if "DATE" in str(cell).upper():
+                            date_col_idx = idx
+                            break
+                    break
+
+            for row in data:
+                if len(row) > date_col_idx:
+                    dt = row[date_col_idx]
                     if isinstance(dt, datetime):
                         months.add((dt.year, dt.month))
-            except:
-                continue
+                    elif isinstance(dt, (str, float, int)) and dt != "":
+                        # Try to parse if it's not already a datetime object
+                        # (Excel sometimes returns floats for dates)
+                        pass # win32com usually returns datetime or None/Empty
+        except Exception as e:
+            print(f"Error reading {name}: {e}")
+            continue
 
     if not months:
         return []
 
     months = sorted(months)
     labels = []
+    if not months: return []
     first_year = months[0][0]
 
     for y, m in months:
@@ -68,10 +87,127 @@ def get_months_from_xns(wb):
         labels.append(label)
     return labels
 
+def _build_cons_sheet_logic(ws, months, pivot_sheets, account_map, start_row, start_col, type1="PURCHASE", type2="SALES", label1="PURCHASE", label2="SALES"):
+    """Encapsulates the core logic for building a consolidation sheet."""
+    pivot_count = len(pivot_sheets)
+    if pivot_count == 0:
+        ws.Cells(start_row, start_col).Value = "No accounts found for this category."
+        return
+
+    # 1. Build Header
+    header_vals = ["MONTH"]
+    for sheet in pivot_sheets:
+        suffix = sheet.split("PIVOT-")[-1].strip()
+        holder_name = account_map.get(suffix, "")
+        if not holder_name:
+            holder_name = next((v for k, v in account_map.items() if k in suffix), "")
+        header_vals.append(f"{holder_name}\n{suffix}\n{label1}")
+    header_vals.append(f"{label1}\nTOTAL")
+    
+    for sheet in pivot_sheets:
+        suffix = sheet.split("PIVOT-")[-1].strip()
+        holder_name = account_map.get(suffix, "")
+        if not holder_name:
+            holder_name = next((v for k, v in account_map.items() if k in suffix), "")
+        header_vals.append(f"{holder_name}\n{suffix}\n{label2}")
+    header_vals.append(f"{label2}\nTOTAL")
+
+    last_col_idx = start_col + len(header_vals) - 1
+    header_range = ws.Range(ws.Cells(start_row, start_col), ws.Cells(start_row, last_col_idx))
+    header_range.Value = header_vals
+
+    # Define column indices
+    purchase_start_col = start_col + 1
+    purchase_end_col = purchase_start_col + pivot_count - 1
+    purchase_total_col = purchase_end_col + 1
+    sales_start_col = purchase_total_col + 1
+    sales_end_col = sales_start_col + pivot_count - 1
+    sales_total_col = sales_end_col + 1
+
+    # 2. Process Data
+    wb = ws.Parent
+    rows_to_paste = []
+    for i, month_label in enumerate(months):
+        row_data = [month_label]
+        r_idx = start_row + 2 + (i * 2)
+        
+        # First Type Section (e.g. Purchase or Bank Fin Debit)
+        for sheet in pivot_sheets:
+            try:
+                anchor = wb.Worksheets(sheet).PivotTables(1).TableRange2.Cells(1,1).Address
+                # Formula: If value is 0 or error, show NIL. (Simplified)
+                get_pivot_args = f'"Sum of DR",\'{sheet}\'!{anchor},"MONTH","{month_label}","TYPE","{type1}"'
+                formula = f'=IFERROR(IF(GETPIVOTDATA({get_pivot_args})=0, "NIL", GETPIVOTDATA({get_pivot_args})), "NIL")'
+                row_data.append(formula)
+            except:
+                row_data.append("NIL")
+        
+        p_total_formula = f"=SUM({ws.Cells(r_idx, purchase_start_col).Address}:{ws.Cells(r_idx, purchase_end_col).Address})"
+        row_data.append(p_total_formula)
+        
+        # Second Type Section (e.g. Sales or Bank Fin Credit)
+        for sheet in pivot_sheets:
+            try:
+                anchor = wb.Worksheets(sheet).PivotTables(1).TableRange2.Cells(1,1).Address
+                # Formula: If value is 0 or error, show NIL. (Simplified)
+                get_pivot_args = f'"Sum of CR",\'{sheet}\'!{anchor},"MONTH","{month_label}","TYPE","{type2}"'
+                formula = f'=IFERROR(IF(GETPIVOTDATA({get_pivot_args})=0, "NIL", GETPIVOTDATA({get_pivot_args})), "NIL")'
+                row_data.append(formula)
+            except:
+                row_data.append("NIL")
+        
+        s_total_formula = f"=SUM({ws.Cells(r_idx, sales_start_col).Address}:{ws.Cells(r_idx, sales_end_col).Address})"
+        row_data.append(s_total_formula)
+        
+        rows_to_paste.append(row_data)
+        rows_to_paste.append([None] * len(row_data)) # Spacer row
+
+    if rows_to_paste:
+        data_range = ws.Range(ws.Cells(start_row + 2, start_col), ws.Cells(start_row + 1 + len(rows_to_paste), last_col_idx))
+        data_range.Formula = rows_to_paste
+
+    # 3. Final Row Summary
+    last_data_filled_row = start_row + 1 + len(rows_to_paste)
+    summary_row = last_data_filled_row + 1
+    
+    ws.Range(ws.Cells(summary_row, start_col + 1), ws.Cells(summary_row, purchase_end_col)).Merge()
+    ws.Cells(summary_row, start_col + 1).Value = f"TOTAL {label1}"
+    ws.Cells(summary_row, purchase_total_col).Formula = f"=SUM({ws.Cells(start_row+1, purchase_total_col).Address}:{ws.Cells(last_data_filled_row, purchase_total_col).Address})"
+    
+    ws.Range(ws.Cells(summary_row, sales_start_col), ws.Cells(summary_row, sales_end_col)).Merge()
+    ws.Cells(summary_row, sales_start_col).Value = f"TOTAL {label2}"
+    ws.Cells(summary_row, sales_total_col).Formula = f"=SUM({ws.Cells(start_row+1, sales_total_col).Address}:{ws.Cells(last_data_filled_row, sales_total_col).Address})"
+
+    # 4. Formatting
+    summary_row_range = ws.Range(ws.Cells(summary_row, start_col), ws.Cells(summary_row, sales_total_col))
+    summary_row_range.HorizontalAlignment = -4108
+    summary_row_range.VerticalAlignment = -4108
+    summary_row_range.Font.Bold = True
+
+    table_range = ws.Range(ws.Cells(start_row, start_col), ws.Cells(summary_row, sales_total_col))
+    table_range.Font.Bold = True
+    for b_id in [7, 8, 9, 10, 11, 12]:
+        table_range.Borders(b_id).LineStyle = 1
+        
+    numeric_range = ws.Range(ws.Cells(start_row + 1, start_col + 1), ws.Cells(summary_row, sales_total_col))
+    numeric_range.NumberFormat = "0.00"
+        
+    ws.Rows(f"{start_row + 1}:{summary_row - 1}").RowHeight = 18
+    ws.Rows(summary_row).RowHeight = 40
+    for col_idx in range(start_col, sales_total_col + 1):
+        ws.Columns(col_idx).ColumnWidth = 15
+        
+    ws.Range(ws.Cells(start_row, purchase_total_col), ws.Cells(summary_row, purchase_total_col)).Font.ColorIndex = 3
+    ws.Range(ws.Cells(start_row, sales_total_col), ws.Cells(summary_row, sales_total_col)).Font.ColorIndex = 3
+    
+    header_range.WrapText = True
+    header_range.HorizontalAlignment = -4108
+    header_range.VerticalAlignment = -4108
+    ws.Rows(start_row).AutoFit()
+
 def create_cons_sheet(file_path):
-    """Generates the 'CONS' summary sheet using GETPIVOTDATA formulas for consolidated view."""
+    """Generates the 'CONS' summary sheets (Main, Bank Fin, Pvt Fin)."""
     if not os.path.exists(file_path):
-        print(f"File not found: {file_path}")
         return
 
     pythoncom.CoInitialize()
@@ -83,17 +219,41 @@ def create_cons_sheet(file_path):
         excel.DisplayAlerts = False
         excel.ScreenUpdating = False
         excel.EnableEvents = False
-        try:
-            excel.Calculation = -4135 # xlCalculationManual
-        except:
-            pass
+        try: excel.Calculation = -4135
+        except: pass
 
         wb = excel.Workbooks.Open(file_path)
-        months = get_months_from_xns(wb)
-        if not months:
-            raise ValueError("No months found in XNS sheets. Summary sheet cannot be created.")
+        # 1. Identify Pivot Sheets and Specialized Accounts
+        all_pivots = [s.Name for s in wb.Worksheets if s.Name.startswith("PIVOT")]
+        if not all_pivots:
+            return
 
-        # 1. Parse account details from ANALYSIS
+        # 2. Extract Month Labels from the first XNS/Pivot to ensure perfect matching
+        # Instead of generating them, we'll read the labels used in the PivotTable MONTH field.
+        # We MUST follow the position (order) of the items as shown in the pivot.
+        months_with_pos = []
+        try:
+            ws_ref = wb.Worksheets(all_pivots[0])
+            pt = ws_ref.PivotTables(1)
+            month_field = pt.PivotFields("MONTH")
+            
+            for item in month_field.PivotItems():
+                # Only include visible items that are not (blank)
+                if item.Visible and "(blank)" not in str(item.Name).lower():
+                    months_with_pos.append((item.Position, str(item.Name)))
+            
+            # Sort by Position (Excel starts position at 1)
+            months_with_pos.sort(key=lambda x: x[0])
+            months = [m[1] for m in months_with_pos]
+        except Exception as e:
+            print(f"Error reading month items from pivot: {e}")
+            # Fallback to the existing method if reading items fails
+            months = get_months_from_xns(wb)
+
+        if not months:
+            return
+
+        # 3. Parse account details from ANALYSIS (for names and metadata)
         account_details = []
         try:
             analysis_ws = wb.Worksheets("ANALYSIS")
@@ -105,132 +265,84 @@ def create_cons_sheet(file_path):
             print(f"Error parsing ANALYSIS sheet: {e}")
 
         account_map = {}
+        bank_fin_accounts = []
+        pvt_fin_accounts = []
+        
         for acc in account_details:
             holder = acc.get("Name of the Account Holder")
-            acc_num = acc.get("Account Number")
+            acc_num = str(acc.get("Account Number", ""))[-4:]
+            acc_type = str(acc.get("Account Type", "")).upper().strip()
+            
             if acc_num:
-                account_map[str(acc_num)[-4:]] = holder
+                account_map[acc_num] = holder
+                if "BANK FIN" in acc_type:
+                    bank_fin_accounts.append(acc_num)
+                elif "PVT FIN" in acc_type:
+                    pvt_fin_accounts.append(acc_num)
 
-        # 2. Prep CONS sheet
-        try:
-            excel.DisplayAlerts = False
-            wb.Worksheets("CONS").Delete()
-            excel.DisplayAlerts = True
-        except:
-            pass
-
-        ws = wb.Worksheets.Add(After=wb.Worksheets(wb.Worksheets.Count))
-        ws.Name = "CONS"
-
-        pivot_sheets = [s.Name for s in wb.Worksheets if s.Name.startswith("PIVOT")]
-        pivot_count = len(pivot_sheets)
+        # 4. Specialized Accounts Detection
+        # Pre-scan pivots to identify which accounts have BANK FIN or PVT FIN transactions
+        # This acts as a more robust fallback if the ANALYSIS sheet 'Account Type' is generic.
+        detected_bank_fin = set()
+        detected_pvt_fin = set()
         
-        # 3. Build Header
-        header_vals = ["MONTH"]
-        for sheet in pivot_sheets:
-            suffix = sheet.replace("PIVOT-", "")
-            holder_name = account_map.get(suffix, "")
-            if not holder_name:
-                holder_name = next((v for k, v in account_map.items() if k in suffix), "")
-            header_vals.append(f"{holder_name}\n{suffix}\nPURCHASE")
-        header_vals.append("PURCHASE\nTOTAL")
-        
-        for sheet in pivot_sheets:
-            suffix = sheet.replace("PIVOT-", "")
-            holder_name = account_map.get(suffix, "")
-            if not holder_name:
-                holder_name = next((v for k, v in account_map.items() if k in suffix), "")
-            header_vals.append(f"{holder_name}\n{suffix}\nSALES")
-        header_vals.append("SALES\nTOTAL")
+        for p_name in all_pivots:
+            try:
+                # Find the suffix (e.g. 96706-CA)
+                suffix = p_name.split("PIVOT-")[-1].strip()
+                ws_pivot = wb.Worksheets(p_name)
+                # Check for PivotTable items
+                pt = ws_pivot.PivotTables(1)
+                type_field = pt.PivotFields("TYPE")
+                for item in type_field.PivotItems():
+                    item_name = str(item.Name).upper().strip()
+                    if item_name == "BANK FIN":
+                        detected_bank_fin.add(suffix)
+                    if item_name == "PVT FIN":
+                        detected_pvt_fin.add(suffix)
+            except:
+                continue
 
-        last_col_idx = START_COL + len(header_vals) - 1
-        header_range = ws.Range(ws.Cells(START_ROW, START_COL), ws.Cells(START_ROW, last_col_idx))
-        header_range.Value = header_vals
+        # Combine ANALYSIS metadata with detected transaction types
+        bank_fin_suffixes = set(bank_fin_accounts) | detected_bank_fin
+        pvt_fin_suffixes = set(pvt_fin_accounts) | detected_pvt_fin
 
-        # Define column indices
-        purchase_start_col = START_COL + 1
-        purchase_end_col = purchase_start_col + pivot_count - 1
-        purchase_total_col = purchase_end_col + 1
-        sales_start_col = purchase_total_col + 1
-        sales_end_col = sales_start_col + pivot_count - 1
-        sales_total_col = sales_end_col + 1
+        targets = [
+            ("CONS", all_pivots),
+            ("BANK FIN CONS", [p for p in all_pivots if any(suf in p for suf in bank_fin_suffixes)]),
+            ("PVT FIN CONS", [p for p in all_pivots if any(suf in p for suf in pvt_fin_suffixes)])
+        ]
 
-        # 4. Process Data (Build 2D array for bulk write)
-        rows_to_paste = []
-        for i, month_label in enumerate(months):
-            pivot_month = month_label.split("(")[0]
-            row_data = [month_label]
+        for s_name, pivot_list in targets:
+            try:
+                excel.DisplayAlerts = False
+                wb.Worksheets(s_name).Delete()
+                excel.DisplayAlerts = True
+            except: pass
             
-            r_idx = START_ROW + 2 + (i * 2)
-            
-            # Purchase formulas
-            for sheet in pivot_sheets:
-                anchor = wb.Worksheets(sheet).PivotTables(1).TableRange2.Cells(1,1).Address
-                formula = f'=IFERROR(GETPIVOTDATA("Sum of DR",\'{sheet}\'!{anchor},"MONTH","{pivot_month}","TYPE","PURCHASE"),"NIL")'
-                row_data.append(formula)
-            
-            p_total_formula = f"=SUM({ws.Cells(r_idx, purchase_start_col).Address}:{ws.Cells(r_idx, purchase_end_col).Address})"
-            row_data.append(p_total_formula)
-            
-            # Sales formulas
-            for sheet in pivot_sheets:
-                anchor = wb.Worksheets(sheet).PivotTables(1).TableRange2.Cells(1,1).Address
-                formula = f'=IFERROR(GETPIVOTDATA("Sum of CR",\'{sheet}\'!{anchor},"MONTH","{pivot_month}","TYPE","SALES"),"NIL")'
-                row_data.append(formula)
-            
-            s_total_formula = f"=SUM({ws.Cells(r_idx, sales_start_col).Address}:{ws.Cells(r_idx, sales_end_col).Address})"
-            row_data.append(s_total_formula)
-            
-            rows_to_paste.append(row_data)
-            rows_to_paste.append([None] * len(row_data)) # Spacer row
+            # Skip specialized sheets if fewer than 2 accounts found for them
+            if s_name != "CONS" and len(pivot_list) < 2:
+                continue
 
-        if rows_to_paste:
-            data_range = ws.Range(ws.Cells(START_ROW + 2, START_COL), ws.Cells(START_ROW + 1 + len(rows_to_paste), last_col_idx))
-            data_range.Formula = rows_to_paste
-
-        # 5. Final Row Summary
-        last_data_filled_row = START_ROW + 1 + len(rows_to_paste)
-        summary_row = last_data_filled_row + 1
-        
-        ws.Range(ws.Cells(summary_row, START_COL + 1), ws.Cells(summary_row, purchase_end_col)).Merge()
-        ws.Cells(summary_row, START_COL + 1).Value = "TOTAL PURCHASE"
-        ws.Cells(summary_row, purchase_total_col).Formula = f"=SUM({ws.Cells(START_ROW+1, purchase_total_col).Address}:{ws.Cells(last_data_filled_row, purchase_total_col).Address})"
-        
-        ws.Range(ws.Cells(summary_row, sales_start_col), ws.Cells(summary_row, sales_end_col)).Merge()
-        ws.Cells(summary_row, sales_start_col).Value = "TOTAL SALES"
-        ws.Cells(summary_row, sales_total_col).Formula = f"=SUM({ws.Cells(START_ROW+1, sales_total_col).Address}:{ws.Cells(last_data_filled_row, sales_total_col).Address})"
-
-        # Center align the summary row
-        summary_row_range = ws.Range(ws.Cells(summary_row, START_COL), ws.Cells(summary_row, sales_total_col))
-        summary_row_range.HorizontalAlignment = -4108 # xlCenter
-        summary_row_range.VerticalAlignment = -4108   # xlCenter
-
-        # 6. Formatting
-        table_range = ws.Range(ws.Cells(START_ROW, START_COL), ws.Cells(summary_row, sales_total_col))
-        table_range.Font.Bold = True
-        for b_id in [7, 8, 9, 10, 11, 12]:
-            table_range.Borders(b_id).LineStyle = 1
+            ws = wb.Worksheets.Add(After=wb.Worksheets(wb.Worksheets.Count))
+            ws.Name = s_name
             
-        numeric_range = ws.Range(ws.Cells(START_ROW + 1, START_COL + 1), ws.Cells(summary_row, sales_total_col))
-        numeric_range.NumberFormat = "0.00"
-            
-        ws.Rows(f"{START_ROW + 1}:{summary_row - 1}").RowHeight = 18
-        ws.Rows(summary_row).RowHeight = 40
-        for col_idx in range(START_COL, sales_total_col + 1):
-            ws.Columns(col_idx).ColumnWidth = 15
-            
-        p_total_range = ws.Range(ws.Cells(START_ROW, purchase_total_col), ws.Cells(summary_row, purchase_total_col))
-        s_total_range = ws.Range(ws.Cells(START_ROW, sales_total_col), ws.Cells(summary_row, sales_total_col))
-        p_total_range.Font.ColorIndex = 3
-        s_total_range.Font.ColorIndex = 3
-        
-        header_range.WrapText = True
-        header_range.HorizontalAlignment = -4108
-        header_range.VerticalAlignment = -4108
-        ws.Rows(START_ROW).AutoFit()
+            # Use dynamic types and labels based on the sheet name
+            if s_name == "BANK FIN CONS":
+                _build_cons_sheet_logic(ws, months, pivot_list, account_map, START_ROW, START_COL, 
+                                      type1="BANK FIN", type2="BANK FIN", 
+                                      label1="BANK FIN DEBIT", label2="BANK FIN CREDIT")
+            elif s_name == "PVT FIN CONS":
+                _build_cons_sheet_logic(ws, months, pivot_list, account_map, START_ROW, START_COL, 
+                                      type1="PVT FIN", type2="PVT FIN", 
+                                      label1="PVT FIN DEBIT", label2="PVT FIN CREDIT")
+            else:
+                _build_cons_sheet_logic(ws, months, pivot_list, account_map, START_ROW, START_COL,
+                                      type1="PURCHASE", type2="SALES", 
+                                      label1="PURCHASE", label2="SALES")
 
-        print("CONS sheet created successfully.")
         wb.Save()
+        print("Consolidation sheets created successfully.")
     finally:
         if wb:
             try:

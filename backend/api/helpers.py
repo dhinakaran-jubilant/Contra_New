@@ -286,6 +286,16 @@ def normalize_name(name: str) -> str:
     return " ".join(parts)
 
 
+def sanitize_filename(name: str) -> str:
+    """Remove or replace characters that are invalid in filenames across OSes."""
+    if not name:
+        return "unnamed"
+    # Replace invalid chars with underscore: < > : " / \ | ? *
+    s = re.sub(r'[<>:"/\\|?*]', '_', str(name))
+    # Also strip trailing dots and spaces which can cause issues on Windows
+    return s.strip(". ").strip()
+
+
 def is_valid_xns_sheet_name(sheet_name):
     name = str(sheet_name).upper().replace(' ', '')
     if name == "XNS":
@@ -460,44 +470,6 @@ def log_processing(user_name, file_name, bank_name, total_entries, software_coun
     from datetime import timedelta
 
     try:
-        # 1. Proactively ensure the logging table exists
-        from django.db import connection, transaction
-        table_name = FileProcessingLog._meta.db_table
-        
-        # Check presence in the list of existing tables
-        if table_name not in connection.introspection.table_names():
-            from django.core.management import call_command
-            print(f"🔄 Table '{table_name}' missing from DB. Attempting recovery...")
-            
-            # ATTEMPT A: Standard Migration
-            try:
-                call_command('migrate', 'api', interactive=False)
-            except Exception as migrate_err:
-                print(f"⚠️ Standard migration attempt failed: {migrate_err}")
-
-            # Refresh connection and check again
-            connection.close()
-            if table_name not in connection.introspection.table_names():
-                # ATTEMPT B: Raw SQL Fallback (Cross-DB)
-                print(f"⚠️ Table still missing. Falling back to raw SQL for '{table_name}'...")
-                engine = connection.settings_dict.get('ENGINE', '')
-                id_sql   = "SERIAL PRIMARY KEY" if "postgres" in engine else "INTEGER PRIMARY KEY AUTOINCREMENT"
-                
-                with connection.cursor() as cursor:
-                    cursor.execute(f"""
-                        CREATE TABLE IF NOT EXISTS {table_name} (
-                            id {id_sql},
-                            user_name VARCHAR(150),
-                            file_name VARCHAR(255),
-                            bank_name VARCHAR(100),
-                            processed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                            total_entries INTEGER DEFAULT 0,
-                            software_count TEXT,
-                            final_count TEXT
-                        )
-                    """)
-                print(f"[SUCCESS] Table '{table_name}' forced creation via raw SQL.")
-
         # 2. Check for duplicate within the last 10 seconds
         if not processed_at:
             ten_seconds_ago = timezone.now() - timedelta(seconds=10)

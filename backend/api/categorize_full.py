@@ -607,7 +607,9 @@ def categorize_return_type(df, bank_code=None):
                         rep_idxs.append(rep_idx)
                         df.at[rep_idx, '_used_rep'] = True
 
-                if bounced and final_text is not None:
+                if final_text == 'NEFT':
+                    df.at[idx, 'Category'] = 'I/W NEFT RTN'
+                elif bounced and final_text is not None:
                     if rep_chq_no:
                         df.at[idx, 'Cheque_No'] = int(float(rep_chq_no))
                     df.at[idx, 'Category'] = f'I/W {final_text} RTN (NOT REP)'
@@ -615,7 +617,9 @@ def categorize_return_type(df, bank_code=None):
                     is_loan    = str(rep_cat).strip().upper() == 'LOAN'
                     rep_dates  = sorted(set(rep_dates))
                     date_text  = ", ".join(d.strftime("%d-%m-%Y") for d in rep_dates)
-                    if final_text is not None:
+                    if final_text == 'NEFT':
+                        text = 'I/W NEFT RTN'
+                    elif final_text is not None:
                         text = (f'I/W {final_text} RTN ON DATE'
                                 if len(rep_dates) == 1 and rep_dates[0] == row['Date']
                                 else f'I/W {final_text} RTN ON {date_text}')
@@ -636,7 +640,9 @@ def categorize_return_type(df, bank_code=None):
                         df.at[idx, 'Cheque_No'] = int(float(rep_chq_no))
                     df.at[idx, 'Category'] = text
             else:
-                if final_text is not None:
+                if final_text == 'NEFT':
+                    df.at[idx, 'Category'] = 'I/W NEFT RTN'
+                elif final_text is not None:
                     df.at[idx, 'Category'] = f'I/W {final_text} RTN (NOT REP)'
 
         # ── Charge/simple bounce categories ──────────────────────────────

@@ -184,9 +184,9 @@ def _update_single_worksheet(spreadsheet, sheet_id_or_name, summary_report: list
             last_row_has_bg  = check_last_row_background(sheet, len(all_data))
             should_have_bg   = not last_row_has_bg
 
-        # ── Append new rows ─────────────────────────────────────────────────
-        new_rows_added = 0
-        new_rows_data  = []
+        # ── Append new rows (BATCHED) ───────────────────────────────────────
+        new_rows_data_to_append = []
+        new_rows_meta = []
 
         for item in summary_report:
             fingerprint = _get_item_fingerprint(item, is_master, is_live)
@@ -195,17 +195,15 @@ def _update_single_worksheet(spreadsheet, sheet_id_or_name, summary_report: list
                 continue
 
             row_data = _build_row_data(item, is_live, serial=next_row - 1, is_master=is_master)
-            sheet.append_row(row_data, value_input_option='USER_ENTERED')
-
-            new_rows_data.append({'row_number': next_row, 'file_name': item.get("File Name", ""), 'data': row_data})
+            new_rows_data_to_append.append(row_data)
+            new_rows_meta.append({'row_number': next_row, 'file_name': item.get("File Name")})
             next_row += 1
-            new_rows_added += 1
 
-        # ── Formatting ──────────────────────────────────────────────────────
-        if new_rows_added > 0:
-            apply_batch_color_simple(sheet, new_rows_data, should_have_bg, is_live, is_master)
+        if new_rows_data_to_append:
+            sheet.append_rows(new_rows_data_to_append, value_input_option='USER_ENTERED')
+            apply_batch_color_simple(sheet, new_rows_meta, should_have_bg, is_live, is_master)
+            print(f"   ✅ {sheet.title}: Added {len(new_rows_data_to_append)} rows.")
         
-        print(f"   ✅ {sheet.title}: Added {new_rows_added} rows.")
         return True
 
     except Exception as e:
@@ -318,9 +316,12 @@ def check_last_row_background(sheet, last_row_num: int) -> bool:
 
 def apply_batch_color_simple(sheet, new_rows_data: list, should_have_bg: bool, is_live: bool = False, is_master: bool = False) -> None:
     """
-    Apply background colour and solid borders to every newly-appended row.
+    Apply background colour and solid borders to newly-appended rows using a single batch call.
     """
     try:
+        if not new_rows_data:
+            return
+
         if is_master:
             col_end = "N"
         elif is_live:
@@ -331,8 +332,18 @@ def apply_batch_color_simple(sheet, new_rows_data: list, should_have_bg: bool, i
         bg_colour  = _GREY_BG if should_have_bg else _WHITE_BG
         fmt        = {"backgroundColor": bg_colour, "borders": _BORDERS}
 
+        # Build list of format requests
+        formats = []
         for row_info in new_rows_data:
             cell_range = f"A{row_info['row_number']}:{col_end}{row_info['row_number']}"
-            sheet.format(cell_range, fmt)
+            formats.append({
+                "range": cell_range,
+                "format": fmt
+            })
+        
+        # Execute in ONE batch call
+        sheet.batch_format(formats)
+        print(f"   ✨ Batch formatted {len(formats)} rows in {sheet.title}")
+
     except Exception as e:
-        print(f"❌ Formatting error: {e}")
+        print(f"❌ Batch formatting error: {e}")

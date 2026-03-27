@@ -4,6 +4,8 @@ import os
 import mimetypes
 import pandas as pd
 import base64
+import pythoncom
+import win32com.client as win32
 from pathlib import Path
 from api.helpers import (
     get_sheet_name, get_month_values, log_processing, get_category_counts,
@@ -25,11 +27,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from openpyxl import load_workbook
 from rest_framework import status
-from pathlib import Path
-import pandas as pd
-import mimetypes
-import base64
-import os
 
 # ============================================================
 # Module-level constants
@@ -102,12 +99,12 @@ def _make_summary_entry(user_info: str, acc_name: str, sheet_name: str,
     return entry
 
 
-def _make_software_download_entry(file_info: dict, df: pd.DataFrame) -> dict:
+def _make_software_download_entry(file_info: dict, df: pd.DataFrame, excel=None) -> dict:
     """Build a download-list entry for a software file, creating the pivot sheet."""
     file_path = file_info['file_path']
     sheet_name = file_info['sheet_name']
     limit = _get_od_limit(df, sheet_name)
-    create_pivot(file_path, sheet_name, limit)
+    create_pivot(file_path, sheet_name, limit, excel=excel)
     return {
         "file_name": file_info['file_name'],
         "account_name": file_info['account_name'],
@@ -406,6 +403,8 @@ class MatchStatement(APIView):
 
             download_files = []
             if os.path.exists(file_path):
+                # We can just use the default create_pivot behavior here since it's only one file,
+                # but for consistency with the optimized flow:
                 download_files.append(_make_software_download_entry(saved, new_df))
 
             summary = [_make_summary_entry(
@@ -666,12 +665,29 @@ class MatchStatement(APIView):
 
         total_entries = sum(len(df) for df in all_files_to_process.values())
 
-        # --- Build download list ---
-        download_files = [
-            _make_software_download_entry(fi, all_files_to_process[fi['sheet_name']])
-            for fi in saved_files_info
-            if os.path.exists(fi['file_path'])
-        ]
+        # --- Build download list (Batch pivot generation) ---
+        excel = None
+        try:
+            pythoncom.CoInitialize()
+            excel = win32.DispatchEx("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
+            excel.ScreenUpdating = False
+            try: excel.Calculation = -4135 # xlCalculationManual
+            except: pass
+
+            download_files = [
+                _make_software_download_entry(fi, all_files_to_process[fi['sheet_name']], excel=excel)
+                for fi in saved_files_info
+                if os.path.exists(fi['file_path'])
+            ]
+        finally:
+            if excel:
+                try: excel.Calculation = -4105
+                except: pass
+                try: excel.Quit()
+                except: pass
+            pythoncom.CoUninitialize()
 
         return Response({
             "success": True,
@@ -875,19 +891,38 @@ class MatchStatement(APIView):
                 final_count=""
             )
 
-        # --- Build download list ---
-        download_files = [
-            _make_working_download_entry(fi)
-            for fi in saved_working_files_info
-            if os.path.exists(fi['file_path'])
-        ] + [
-            _make_software_download_entry(fi, software_data_storage[fi['sheet_name']])
-            for fi in saved_software_files_info
-            if os.path.exists(fi['file_path'])
-        ]
+        # --- Build download list (Batch pivot generation) ---
+        excel = None
+        try:
+            pythoncom.CoInitialize()
+            excel = win32.DispatchEx("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
+            excel.ScreenUpdating = False
+            try: excel.Calculation = -4135 # xlCalculationManual
+            except: pass
 
-        total_entries = sum(len(df) for df in updated_software_data.values()) + \
-                        sum(len(info['df']) for info in updated_working_data.values())
+            download_files = [
+                _make_working_download_entry(fi)
+                for fi in saved_working_files_info
+                if os.path.exists(fi['file_path'])
+            ] + [
+                _make_software_download_entry(fi, updated_software_data[fi['sheet_name']], excel=excel)
+                for fi in saved_software_files_info
+                if os.path.exists(fi['file_path'])
+            ]
+        finally:
+            if excel:
+                try: excel.Calculation = -4105
+                except: pass
+                try: excel.Quit()
+                except: pass
+            pythoncom.CoUninitialize()
+
+        # Calculate total entries
+        total_软件 = sum(len(df) for df in updated_software_data.values())
+        total_working = sum(len(info['df']) for info in updated_working_data.values())
+        total_entries = int(total_软件 + total_working)
 
         return Response({
             "success": True,
@@ -922,24 +957,27 @@ class DownloadFileView(APIView):
     """Serve individual processed files as downloads."""
 
     def get(self, request):
-        try:
-            file_path_encoded = request.query_params.get('file_path', '')
-            if not file_path_encoded:
-                return JsonResponse(
-                    {"error": "file_path parameter is required"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            file_path = base64.b64decode(file_path_encoded.encode()).decode()
-            downloads_path = get_downloads()
-
-            allowed_dirs = [
-                downloads_path / "Matched_Statements",
-                downloads_path / config.PROCESSED_DIR,
+        """Download file endpoint."""
+        # Cache allowed dirs for performance
+        if not hasattr(self.__class__, '_allowed_dirs'):
+            downloads = get_downloads()
+            self.__class__._allowed_dirs = [
+                (downloads / "Matched_Statements").resolve(),
+                (downloads / config.PROCESSED_DIR).resolve(),
             ]
+
+        try:
+            file_path_encoded = request.GET.get('file_path')
+            if not file_path_encoded:
+                return Response({"error": "No file path provided"}, status=status.HTTP_400_BAD_REQUEST)
+
+            file_path_str = base64.b64decode(file_path_encoded.encode()).decode()
+            file_path = Path(file_path_str)
+            
+            # Efficient path check using is_relative_to
             file_allowed = any(
-                file_path.startswith(str(d.resolve()))
-                for d in allowed_dirs
+                file_path.is_relative_to(d)
+                for d in self.__class__._allowed_dirs
             )
             if not file_allowed:
                 return JsonResponse(

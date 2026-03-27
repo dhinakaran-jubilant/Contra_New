@@ -1,20 +1,18 @@
 from difflib import SequenceMatcher
-import spacy
 import re
-
-nlp = spacy.load("en_core_web_sm")
-
-# ── Constants ──────────────────────────────────────────────────────────────────
 
 # Pre-compiled: strip M/S prefixes and non-alphanumeric characters in one pass
 _PREFIX_RE  = re.compile(r"\bm[/ ]?s\b", re.IGNORECASE)
 _CLEAN_RE   = re.compile(r"[^a-z0-9\s]")
-_SPACE_RE   = re.compile(r"\s+")
+
+# Fast tokenization instead of full Spacy model for performance
+_TOKEN_RE = re.compile(r"\b\w{2,}\b") # Tokens of at least 2 chars
 
 STOP_WORDS = frozenset({
     "imps", "neft", "upi", "rtgs", "payment",
     "bank", "ltd", "limited", "pvt", "private",
     "services", "service", "fin", "finance",
+    "and", "the", "for", "with",
 })
 
 
@@ -37,15 +35,15 @@ def _concat_match(token: str, token_list: list[str], max_concat: int = 4) -> boo
 # ── Public helpers ─────────────────────────────────────────────────────────────
 
 def normalize_name(name: str) -> list[str]:
-    """Normalize and tokenize a name / category string."""
+    """Normalize and tokenize a name / category string using fast regex."""
     if not name:
         return []
-    s = name.lower().replace("&", " and ")
+    s = str(name).lower().replace("&", " and ")
     s = _PREFIX_RE.sub(" ", s)
     s = _CLEAN_RE.sub(" ", s)
-    s = _SPACE_RE.sub(" ", s).strip()
-    doc = nlp(s)
-    return [tok.text for tok in doc if tok.text and tok.text not in STOP_WORDS]
+    # Fast tokenization and stop-word removal without NLP model overhead
+    tokens = _TOKEN_RE.findall(s)
+    return [t for t in tokens if t not in STOP_WORDS]
 
 
 def is_same_name(

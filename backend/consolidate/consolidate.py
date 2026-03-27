@@ -6,52 +6,72 @@ import time
 import traceback
 import re
 
-def validate_excel_files(file_paths):
+def validate_and_find_main(excel, file_paths):
     """
-    Validates that each Excel file has:
+    Validates files and identifies the best base file in one pass.
+    To be valid, each file needs:
     - Exactly 1 ANALYSIS sheet
     - Minimum 1 PIVOT-XXX sheet
     - Minimum 1 XNS-XXX sheet
+    Returns (is_valid, error_msg, main_file, other_files, last_p_count, last_x_count)
     """
-    pythoncom.CoInitialize()
-    excel = None
-    try:
-        excel = win32.DispatchEx("Excel.Application")
-        excel.Visible = False
-        excel.DisplayAlerts = False
-        
-        last_pivot_count = 0
-        last_xns_count = 0
+    sheet_counts = []
+    last_p = 0
+    last_x = 0
 
-        for path in file_paths:
-            if not os.path.exists(path):
-                continue
-            
+    for path in file_paths:
+        if not os.path.exists(path):
+            continue
+        
+        try:
             wb = excel.Workbooks.Open(path)
+            # Use a fast list comprehension to get all names at once
             sheet_names = [sh.Name.upper() for sh in wb.Worksheets]
             wb.Close(False)
-            
+
             analysis_count = sheet_names.count("ANALYSIS")
-            # Lenient count for validation too
             pivot_count = sum(1 for name in sheet_names if "PIVOT" in name)
             xns_count = sum(1 for name in sheet_names if "XNS" in name)
             
-            last_pivot_count = pivot_count
-            last_xns_count = xns_count
-
+            # Validation
             filename = os.path.basename(path)
             errors = []
             if analysis_count != 1:
-                errors.append(f"must have exactly 1 'ANALYSIS' sheet (found {analysis_count})")
+                errors.append(f"must have 1 'ANALYSIS' sheet (found {analysis_count})")
             if pivot_count < 1:
                 errors.append("must have at least 1 'PIVOT' sheet")
             if xns_count < 1:
                 errors.append("must have at least 1 'XNS' sheet")
             
             if errors:
-                return False, f"File '{filename}' is invalid: {', '.join(errors)}.", 0, 0
-        
-        return True, "", last_pivot_count, last_xns_count
+                return False, f"File '{filename}' invalid: {', '.join(errors)}.", None, [], 0, 0
+
+            # Store sheet count for main file selection
+            sheet_counts.append((path, pivot_count + xns_count))
+            last_p, last_x = pivot_count, xns_count
+
+        except Exception as e:
+            return False, f"Error processing {os.path.basename(path)}: {str(e)}", None, [], 0, 0
+
+    if not sheet_counts:
+        return False, "No valid files found.", None, [], 0, 0
+
+    max_c = max(c for _, c in sheet_counts)
+    main_path = next(p for p, c in sheet_counts if c == max_c)
+    others = [p for p, _ in sheet_counts if p != main_path]
+
+    return True, "", main_path, others, last_p, last_x
+
+def validate_excel_files(file_paths):
+    """Compatibility wrapper for validate_excel_files."""
+    pythoncom.CoInitialize()
+    excel = None
+    try:
+        excel = win32.DispatchEx("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        is_valid, err, _, _, p_count, x_count = validate_and_find_main(excel, file_paths)
+        return is_valid, err, p_count, x_count
     except Exception as e:
         return False, f"Validation error: {str(e)}", 0, 0
     finally:
@@ -80,27 +100,7 @@ def find_analysis_last_row(sheet):
         print(f"Error finding last row: {e}")
     return None
 
-def find_main_file(excel, file_paths):
-    """Identifies the file with the most PIVOT and XNS sheets to act as the base."""
-    sheet_counts = []
-    for path in file_paths:
-        try:
-            wb = excel.Workbooks.Open(path)
-            # Lenient count
-            count = sum(1 for s in wb.Sheets if "XNS" in s.Name.upper() or "PIVOT" in s.Name.upper())
-            sheet_counts.append((path, count))
-            wb.Close(False)
-        except Exception as e:
-            print(f"Error checking {path}: {e}")
-            sheet_counts.append((path, 0))
-
-    if not sheet_counts:
-        return None, []
-
-    max_count = max(c for _, c in sheet_counts)
-    main_file = next(p for p, c in sheet_counts if c == max_count)
-    other_files = [p for p, _ in sheet_counts if p != main_file]
-    return main_file, other_files
+# find_main_file is now deprecated; use validate_and_find_main instead.
 
 def merge_excel_files(file_paths):
     """Main function to consolidate multiple Excel files into one."""
@@ -120,9 +120,10 @@ def merge_excel_files(file_paths):
         try: excel.Calculation = -4135
         except: pass
 
-        # 1. Identify main file
-        main_path, other_paths = find_main_file(excel, file_paths)
-        if not main_path:
+        # 1. Validate and Identify main file in ONE pass
+        is_valid, err, main_path, other_paths, _, _ = validate_and_find_main(excel, file_paths)
+        if not is_valid:
+            print(err)
             return None
 
         print(f"Base file: {os.path.basename(main_path)}")

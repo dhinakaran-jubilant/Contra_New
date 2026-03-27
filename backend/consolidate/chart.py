@@ -1,3 +1,4 @@
+from datetime import datetime
 import win32com.client as win32
 from collections import defaultdict
 import pythoncom
@@ -41,15 +42,20 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name):
     
     # Lenient header search
     category_idx = col_map.get("CATEGORY")
+    date_idx = col_map.get("DATE")
     dr_idx = col_map.get("DR")
     cr_idx = col_map.get("CR")
 
     grouped = defaultdict(list)
-    for r in rows:
-        if r and category_idx is not None and len(r) > category_idx:
-            cat = str(r[category_idx]).strip() if r[category_idx] is not None else ""
-            if cat:
-                grouped[cat].append(r)
+    if category_idx is not None:
+        for r in rows:
+            if r and len(r) > category_idx:
+                cat = str(r[category_idx]).strip() if r[category_idx] is not None else ""
+                if cat:
+                    grouped[cat].append(r)
+    else:
+        # Fallback if no category column: just one big block
+        grouped["DATA"].extend(rows)
 
     # Find Append Position
     last_row = master_ws.UsedRange.Rows.Count
@@ -70,7 +76,20 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name):
 
     account_start_row = current_row
 
-    for category, items in grouped.items():
+    # Sort categories to ensure consistent output order? Optional, 
+    # but the items WITHIN categories MUST be sorted by Date.
+    for category in sorted(grouped.keys()):
+        items = grouped[category]
+        
+        # 🚀 Fix: Sort items by Date within the category
+        if date_idx is not None:
+            try:
+                # Excel dates can be datetime objects or numbers. 
+                # We use a helper lambda that handles None/invalid values safely.
+                items.sort(key=lambda x: (x[date_idx] if (len(x) > date_idx and x[date_idx] is not None) else datetime.min))
+            except Exception as sort_e:
+                print(f"  [Sort Warning] Could not sort items in {category}: {sort_e}")
+
         # Write Category Header
         header_range = master_ws.Range(master_ws.Cells(current_row, 1), master_ws.Cells(current_row, len(headers)))
         header_range.Value = headers
@@ -203,19 +222,20 @@ def create_chart_from_pivot(file_path):
                     
                     if xns_ws:
                         try:
-                            # Use Range.CurrentRegion for potentially more robust data detection in 2007
+                            # 🚀 Optimized XNS Fallback: Read once
                             xns_data = xns_ws.UsedRange.Value
                             if xns_data and len(xns_data) >= 1:
-                                # Sometimes header is not in row 1 if there's blank space
-                                header_row_idx = 0
                                 found_cat_col = None
-                                aliases = ["CATEGORY", "CATEG", "CATG", "CAT"]
+                                header_row_idx = 0
+                                aliases = ["CATEGORY", "CATEG", "CATG", "CAT", "PARTICULARS", "DESCRIPTION", "DESC"]
                                 
-                                # Scan first 5 rows for headers
-                                for r_idx in range(min(5, len(xns_data))):
-                                    row_vals = [str(v).strip().upper() if v is not None else "" for v in xns_data[r_idx]]
+                                # Scan first 10 rows for headers
+                                for r_idx in range(min(10, len(xns_data))):
+                                    row = xns_data[r_idx]
+                                    if not row: continue
+                                    row_vals = [str(v).strip().upper() if v is not None else "" for v in row]
                                     for i, v in enumerate(row_vals):
-                                        if any(a in v for a in aliases):
+                                        if any(a == v for a in aliases): # exact match preferred
                                             found_cat_col = i
                                             header_row_idx = r_idx
                                             break
@@ -223,26 +243,25 @@ def create_chart_from_pivot(file_path):
                                 
                                 if found_cat_col is not None:
                                     headers = xns_data[header_row_idx]
-                                    filtered = []
                                     match_key = chart_type.upper().strip()
-                                    for row in xns_data[header_row_idx + 1:]:
-                                        if row and len(row) > found_cat_col:
-                                            val = str(row[found_cat_col]).strip().upper()
-                                            if match_key in val:
-                                                filtered.append(row)
+                                    # Filter in Python
+                                    filtered = [row for row in xns_data[header_row_idx+1:] 
+                                               if row and len(row) > found_cat_col 
+                                               and match_key in str(row[found_cat_col]).upper()]
                                     
                                     if filtered:
                                         temp_ws = wb.Worksheets.Add(After=wb.Worksheets(wb.Worksheets.Count))
                                         safe_name = f"__T_{chart_type[:3]}_{match_suffix[:5]}".replace("-", "_")
                                         try: temp_ws.Name = safe_name
-                                        except: temp_ws.Name = f"T_{int(time.time()) % 10000}"
+                                        except: temp_ws.Name = f"T_{int(time.time()) % 10000}_{chart_type[:2]}"
                                         
-                                        # Use Range carefully for 2007
                                         temp_ws.Range(temp_ws.Cells(1, 1), temp_ws.Cells(1, len(headers))).Value = headers
                                         temp_ws.Range(temp_ws.Cells(2, 1), temp_ws.Cells(1 + len(filtered), len(headers))).Value = filtered
                                         print(f"  ✅ [XNS Fallback Success] {pivot_name} / {chart_type}: {len(filtered)} rows")
+                                        details_expanded = True
                         except Exception as e:
                             print(f"  [XNS Fallback Error] {pivot_name}: {e}")
+
 
                 if temp_ws is None:
                     print(f"  [Skip] No data found for '{chart_type}' in sheet '{pivot_name}'")
@@ -271,7 +290,7 @@ def create_chart_from_pivot(file_path):
                 else:
                     master_ws = master_sheets[chart_type]
 
-                if chart_type in {'BANK FIN', 'PVT FIN', 'RETURN'}:
+                if chart_type in {'BANK FIN', 'PVT FIN'}:
                     process_bank_fin_block(master_ws, temp_ws, match_suffix)
                 else:
                     # Regular Chart Detail Copy
@@ -303,8 +322,43 @@ def create_chart_from_pivot(file_path):
                         header_range.Font.Bold = True
 
                         # Data
+                        # 🚀 Sort: 1st Date (Primary), then Category (Secondary)
+                        raw_data = temp_ws.Range(temp_ws.Cells(2, 1), temp_ws.Cells(t_rows, t_cols)).Value
+                        if not isinstance(raw_data, (tuple, list)): raw_data = ((raw_data,),)
+                        elif not isinstance(raw_data[0], (tuple, list)): raw_data = (raw_data,)
+                        rows_data = [list(r) for r in raw_data]
+                        
+                        # Identify indices from header values
+                        date_idx = cat_idx = None
+                        if h_vals:
+                            for idx, h in enumerate(h_vals):
+                                if h:
+                                    h_str = str(h).upper().strip()
+                                    if "DATE" in h_str: date_idx = idx
+                                    if h_str in ("CATEGORY", "CATEG", "CATG", "CAT", "PARTICULARS", "DESCRIPTION", "DESC"): cat_idx = idx
+                        
+                        def robust_sort_key(row):
+                            # Normalize Date to float for safe comparison with both datetime and numeric Excel dates
+                            d = row[date_idx] if (date_idx is not None and len(row) > date_idx) else None
+                            d_val = 0.0
+                            if isinstance(d, datetime):
+                                # Convert datetime to Excel-style float (days since 1899-12-30)
+                                d_val = (d - datetime(1899, 12, 30)).total_seconds() / 86400.0
+                            elif isinstance(d, (int, float)):
+                                d_val = float(d)
+                                
+                            # Category sort value (Secondary)
+                            c_val = str(row[cat_idx]).upper().strip() if (cat_idx is not None and len(row) > cat_idx and row[cat_idx] is not None) else ""
+                            return (d_val, c_val)
+
+                        if date_idx is not None or cat_idx is not None:
+                            try:
+                                rows_data.sort(key=robust_sort_key)
+                            except Exception as sort_e:
+                                print(f"  [Sort Error] {match_suffix}: {sort_e}")
+
                         dest_data_range = master_ws.Range(master_ws.Cells(header_row + 1, 1), master_ws.Cells(header_row + t_rows - 1, t_cols))
-                        dest_data_range.Value = temp_ws.Range(temp_ws.Cells(2, 1), temp_ws.Cells(t_rows, t_cols)).Value
+                        dest_data_range.Value = rows_data
 
                         # Formatting
                         all_data_range = master_ws.Range(master_ws.Cells(header_row, 1), master_ws.Cells(header_row + t_rows - 1, t_cols))

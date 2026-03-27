@@ -79,7 +79,7 @@ const ConsolidateView = ({ user }) => {
 
             // STEP 2: CONS SHEET (Skip if only 1 file was uploaded)
             if (!skipCons) {
-                setProcessingStatus('Creating summary sheet...');
+                setProcessingStatus('Creating cons sheet...');
                 const consRes = await fetch(`${config.API_BASE_URL}/api/consolidate/`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
