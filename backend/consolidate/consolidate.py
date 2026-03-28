@@ -132,6 +132,21 @@ def merge_excel_files(file_paths):
         try: main_analysis = main_wb.Sheets("ANALYSIS")
         except: pass
 
+        pivots_with_charts = set()
+        chart_categories = ['NAMES', 'ODD FIG', 'DOUBT', 'BANK FIN', 'RETURN', 'PVT FIN']
+        
+        main_has_charts = False
+        for s in main_wb.Sheets:
+            su = s.Name.upper()
+            if any(su == c for c in chart_categories):
+                main_has_charts = True
+                break
+        
+        if main_has_charts:
+            for s in main_wb.Sheets:
+                if "PIVOT" in s.Name.upper():
+                    pivots_with_charts.add(s.Name.upper())
+
         # 2. Merge other files
         for other_path in other_paths:
             print(f"Merging: {os.path.basename(other_path)}")
@@ -152,16 +167,40 @@ def merge_excel_files(file_paths):
                     except Exception as e:
                         print(f"Could not merge ANALYSIS from {os.path.basename(other_path)}: {e}")
 
-                # ⚠️ LENTIENT SHEET COPYING: Copy all PIVOT/XNS sheets regardless of prefix
+                # ⚠️ SHEET COPYING: Copy PIVOT/XNS and append Charts
                 main_sheet_names = {s.Name.upper() for s in main_wb.Sheets}
                 insert_pos = main_wb.Sheets("ANALYSIS").Index + 1 if main_analysis else 1
                 
+                other_has_charts = False
+                for s in other_wb.Sheets:
+                    su = s.Name.upper()
+                    if any(su == c for c in chart_categories):
+                        other_has_charts = True
+                        break
+                
                 for sheet in other_wb.Sheets:
                     sn_upper = sheet.Name.upper()
+                    is_chart = any(sn_upper == c for c in chart_categories)
+                    
                     if "PIVOT" in sn_upper or "XNS" in sn_upper:
                         if sn_upper not in main_sheet_names:
                             sheet.Copy(Before=main_wb.Sheets(insert_pos))
                             main_sheet_names.add(sn_upper)
+                            insert_pos += 1
+                        if "PIVOT" in sn_upper and other_has_charts:
+                            pivots_with_charts.add(sn_upper)
+                    elif is_chart:
+                        # Append chart to main_wb
+                        try:
+                            main_ws = main_wb.Sheets(sheet.Name)
+                            # Append File B's chart data at bottom of File A's chart
+                            ur = sheet.UsedRange
+                            if ur.Rows.Count > 1 or (ur.Rows.Count == 1 and ur.Cells(1,1).Value is not None):
+                                last_row_main = main_ws.Cells(main_ws.Rows.Count, 1).End(-4162).Row
+                                ur.Copy(main_ws.Cells(last_row_main + 3, 1))
+                        except:
+                            # Main WB doesn't have this chart sheet. Copy it!
+                            sheet.Copy(Before=main_wb.Sheets(insert_pos))
                             insert_pos += 1
             finally:
                 other_wb.Close(False)
@@ -189,6 +228,16 @@ def merge_excel_files(file_paths):
                                 print(f"Failed to update PivotTable in {ws.Name}: {pt_e}")
                     except Exception as e:
                         print(f"Failed to update range for {ws.Name}: {e}")
+
+        # Pre-save: Write metadata for already charted pivots
+        if pivots_with_charts:
+            try:
+                meta_ws = main_wb.Sheets.Add(After=main_wb.Sheets(main_wb.Sheets.Count))
+                meta_ws.Name = "SYSTEM_CHART_META"
+                for idx, p_name in enumerate(pivots_with_charts):
+                    meta_ws.Cells(idx + 1, 1).Value = p_name
+                meta_ws.Visible = 2 # xlSheetVeryHidden
+            except: pass
 
         # 4. Save result
         folder = os.path.dirname(main_path)

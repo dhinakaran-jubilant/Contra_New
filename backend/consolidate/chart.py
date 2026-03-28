@@ -227,13 +227,27 @@ def create_chart_from_pivot(file_path):
         chart_list = ['NAMES', 'ODD FIG', 'DOUBT', 'BANK FIN', 'RETURN', 'PVT FIN']
         master_sheets = {}
 
-        # 1. Clean existing chart sheets
-        sheets_to_delete = [sh.Name for sh in wb.Worksheets if sh.Name in chart_list]
-        for name in sheets_to_delete:
+        # 1. DO NOT DELETE existing chart sheets. Just parse them.
+        for c_type in chart_list:
             try:
-                wb.Worksheets(name).Delete()
+                master_sheets[c_type] = wb.Worksheets(c_type)
             except:
                 pass
+                
+        # 1.5 Read tracked pivots that shouldn't be re-charted
+        pivots_with_charts = set()
+        try:
+            meta_ws = wb.Worksheets("SYSTEM_CHART_META")
+            last_r = meta_ws.Cells(meta_ws.Rows.Count, 1).End(-4162).Row
+            for r in range(1, last_r + 1):
+                val = meta_ws.Cells(r, 1).Value
+                if val: pivots_with_charts.add(str(val).upper().strip())
+                
+            excel.DisplayAlerts = False
+            meta_ws.Delete()
+            excel.DisplayAlerts = True
+        except:
+            pass
 
         # 2. Collect pivot sheet names
         pivot_sheet_names = [ws.Name for ws in wb.Worksheets if "PIVOT" in ws.Name.upper()]
@@ -257,6 +271,10 @@ def create_chart_from_pivot(file_path):
 
         # 3. Iterate Pivot Sheets
         for pivot_name in pivot_sheet_names:
+            if pivot_name.upper().strip() in pivots_with_charts:
+                print(f"  [Skip] {pivot_name} already charted from original file.")
+                continue
+                
             ws = wb.Worksheets(pivot_name)
             # Find the unique part of the sheet name (e.g. HDFC-7977-CA)
             match_suffix = pivot_name.upper().split("PIVOT")[-1].strip("- ")
@@ -473,7 +491,14 @@ def create_chart_from_pivot(file_path):
                 ws.Columns("A:Z").AutoFit()
             except:
                 pass
-
+                
+        # Force all sheet names across the workbook to be UPPERCASE
+        for ws in wb.Worksheets:
+            try:
+                ws.Name = str(ws.Name).upper()
+            except:
+                pass
+                
         wb.Save()
         print("Charts created successfully.")
     finally:

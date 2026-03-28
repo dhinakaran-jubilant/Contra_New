@@ -183,6 +183,7 @@ def _build_cons_sheet_logic(ws, months, pivot_sheets, account_map, start_row, st
     summary_row_range.HorizontalAlignment = -4108
     summary_row_range.VerticalAlignment = -4108
     summary_row_range.Font.Bold = True
+    summary_row_range.Font.Color = 255 # Red
 
     table_range = ws.Range(ws.Cells(start_row, start_col), ws.Cells(summary_row, sales_total_col))
     table_range.Font.Bold = True
@@ -191,6 +192,9 @@ def _build_cons_sheet_logic(ws, months, pivot_sheets, account_map, start_row, st
         
     numeric_range = ws.Range(ws.Cells(start_row + 1, start_col + 1), ws.Cells(summary_row, sales_total_col))
     numeric_range.NumberFormat = "0.00"
+    
+    values_range = ws.Range(ws.Cells(start_row + 1, start_col + 1), ws.Cells(summary_row - 1, sales_total_col))
+    values_range.HorizontalAlignment = -4152 # xlRight
         
     ws.Rows(f"{start_row + 1}:{summary_row - 1}").RowHeight = 18
     ws.Rows(summary_row).RowHeight = 40
