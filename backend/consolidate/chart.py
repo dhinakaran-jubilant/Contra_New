@@ -90,11 +90,12 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name, global_months=None):
         if global_months and month_idx is not None:
             # Find the chronological index of the first CR value
             cr_idxs = []
+            global_months_upper = [str(m).strip().upper() for m in global_months]
             for r in items:
-                if cr_idx is not None and len(r) > cr_idx and to_number(r[cr_idx]) > 0:
+                if cr_idx is not None and len(r) > cr_idx and abs(to_number(r[cr_idx])) > 0:
                     m_val = str(r[month_idx]).strip().upper() if len(r) > month_idx and r[month_idx] is not None else ""
-                    if m_val in global_months:
-                        cr_idxs.append(global_months.index(m_val))
+                    if m_val in global_months_upper:
+                        cr_idxs.append(global_months_upper.index(m_val))
             if cr_idxs:
                 first_cr_global_idx = min(cr_idxs)
                 
@@ -113,6 +114,9 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name, global_months=None):
                         except: pass
                     ordered_items.extend(m_items)
                 else:
+                    if first_cr_global_idx != -1 and global_idx < first_cr_global_idx:
+                        continue # Skip adding missing months before the loan disbursement
+                        
                     dummy = ["" for _ in range(len(headers))]
                     dummy[month_idx] = m
                     ordered_items.append(dummy)
