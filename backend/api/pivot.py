@@ -198,7 +198,7 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
                 
                 # Apply previous group if type changed
                 if group_start != -1 and new_type != current_type:
-                    _color_row_range(pivot_sheet, group_start, abs_row - 1, start_col + 1, col_count - 1, current_type)
+                    _color_row_range(pivot_sheet, group_start, abs_row - 1, start_col + 1, start_col + col_count - 1, current_type)
                     group_start = -1
                 
                 current_type = new_type
@@ -217,7 +217,7 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
         
         # Final group
         if group_start != -1:
-            _color_row_range(pivot_sheet, group_start, start_row + row_count - 1, start_col + 1, col_count - 1, current_type)
+            _color_row_range(pivot_sheet, group_start, start_row + row_count - 1, start_col + 1, start_col + col_count - 1, current_type)
 
         # ── Header rows + Grand Total row background ──────────────────────
         for i in range(3):
