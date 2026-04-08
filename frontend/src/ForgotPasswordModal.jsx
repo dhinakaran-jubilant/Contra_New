@@ -1,3 +1,4 @@
+import React, { useState, useEffect } from 'react';
 import SuccessModal from './SuccessModal';
 import config from './config';
 
