@@ -13,4 +13,7 @@ urlpatterns = [
     path('download-file/', views.download_file, name='download_file'),
     path('stats/', views.get_stats, name='get_stats'),
     path('get_processing_logs/', views.get_processing_logs, name='get_processing_logs'),
+    path('save-incentive/', views.save_incentive, name='save_incentive'),
+    path('get-incentives/', views.get_incentives, name='get_incentives'),
+    path('export-incentives/', views.export_incentives, name='export_incentives'),
 ]

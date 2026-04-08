@@ -5,6 +5,8 @@ import Consolidate from './Consolidate'
 import Login from './Login'
 import AdminDashboard from './AdminDashboard'
 import HomeDashboard from './HomeDashboard'
+import RejectList from './RejectList'
+import Incentive from './Incentive'
 import './index.css'
 
 // Internal App component to use useNavigate
@@ -120,6 +122,24 @@ const AppContent = ({ user, setUser, isLoggedIn, setIsLoggedIn, handleLogout }) 
         path="/consolidate" 
         element={isLoggedIn ? (
           <Consolidate user={user} onLogout={() => { handleLogout(); navigate('/'); }} />
+        ) : (
+          <Navigate to="/" />
+        )} 
+      />
+
+      <Route 
+        path="/reject-list" 
+        element={isLoggedIn ? (
+          <RejectList user={user} onLogout={() => { handleLogout(); navigate('/'); }} />
+        ) : (
+          <Navigate to="/" />
+        )} 
+      />
+
+      <Route 
+        path="/incentive" 
+        element={isLoggedIn ? (
+          <Incentive user={user} onLogout={() => { handleLogout(); navigate('/'); }} />
         ) : (
           <Navigate to="/" />
         )} 

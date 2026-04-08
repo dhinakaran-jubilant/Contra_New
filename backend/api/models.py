@@ -61,3 +61,22 @@ class FileProcessingLog(models.Model):
 
     def __str__(self):
         return f"{self.user_name} - {self.file_name} ({self.processed_at.strftime('%Y-%m-%d %H:%M')})"
+
+
+class Incentive(models.Model):
+    date = models.DateField()
+    for_user = models.CharField(max_length=255, null=True, blank=True)
+    client_name = models.CharField(max_length=255)
+    client_type = models.CharField(max_length=50) # 'Fresh', 'Renewal'
+    shares = models.JSONField() # stores list of {company, amount, incentive}
+    total_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    total_reward = models.DecimalField(max_digits=15, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        db_table = 'incentives'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.for_user} - {self.client_name} - {self.date} ({self.total_reward})"

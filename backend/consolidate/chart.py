@@ -41,7 +41,7 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name, global_months=None):
     col_map = {h.upper(): i for i, h in enumerate(headers)}
     
     # Lenient header search
-    category_idx = col_map.get("CATEGORY")
+    category_idx = col_map.get("CATEGORY", col_map.get("TYPE"))
     date_idx = col_map.get("DATE")
     dr_idx = col_map.get("DR")
     cr_idx = col_map.get("CR")
@@ -332,7 +332,7 @@ def create_chart_from_pivot(file_path):
                             if xns_data and len(xns_data) >= 1:
                                 found_cat_col = None
                                 header_row_idx = 0
-                                aliases = ["CATEGORY", "CATEG", "CATG", "CAT", "PARTICULARS", "DESCRIPTION", "DESC"]
+                                aliases = ["TYPE", "CATEGORY", "CATEG", "CATG", "CAT", "PARTICULARS", "DESCRIPTION", "DESC"]
                                 
                                 # Scan first 10 rows for headers
                                 for r_idx in range(min(10, len(xns_data))):
@@ -440,7 +440,7 @@ def create_chart_from_pivot(file_path):
                                 if h:
                                     h_str = str(h).upper().strip()
                                     if "DATE" in h_str: date_idx = idx
-                                    if h_str in ("CATEGORY", "CATEG", "CATG", "CAT", "PARTICULARS", "DESCRIPTION", "DESC"): cat_idx = idx
+                                    if h_str in ("TYPE", "CATEGORY", "CATEG", "CATG", "CAT", "PARTICULARS", "DESCRIPTION", "DESC"): cat_idx = idx
                         
                         def robust_sort_key(row):
                             # Normalize Date to float for safe comparison with both datetime and numeric Excel dates
