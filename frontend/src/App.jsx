@@ -5,8 +5,8 @@ import Consolidate from './Consolidate'
 import Login from './Login'
 import AdminDashboard from './AdminDashboard'
 import HomeDashboard from './HomeDashboard'
-import RejectList from './RejectList'
-import Incentive from './Incentive'
+// import RejectList from './RejectList'
+// import Incentive from './Incentive'
 import './index.css'
 
 // Internal App component to use useNavigate
@@ -127,7 +127,7 @@ const AppContent = ({ user, setUser, isLoggedIn, setIsLoggedIn, handleLogout }) 
         )} 
       />
 
-      <Route 
+      {/* <Route 
         path="/reject-list" 
         element={isLoggedIn ? (
           <RejectList user={user} onLogout={() => { handleLogout(); navigate('/'); }} />
@@ -143,7 +143,7 @@ const AppContent = ({ user, setUser, isLoggedIn, setIsLoggedIn, handleLogout }) 
         ) : (
           <Navigate to="/" />
         )} 
-      />
+      /> */}
 
       {/* Catch-all redirect to / */}
       <Route path="*" element={<Navigate to="/" />} />

@@ -83,7 +83,7 @@ const Layout = ({ children, user, onLogout, activeMenu }) => {
                             <span className="material-symbols-outlined">join_inner</span>
                             <span className="text-sm font-semibold">Consolidate</span>
                         </Link>
-                        <Link 
+                        {/* <Link 
                             to="/reject-list" 
                             className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${activeMenu === 'reject-list' 
                                 ? 'bg-primary text-white shadow-md shadow-primary/20' 
@@ -100,7 +100,7 @@ const Layout = ({ children, user, onLogout, activeMenu }) => {
                         >
                             <span className="material-symbols-outlined">workspace_premium</span>
                             <span className="text-sm font-semibold">Incentive</span>
-                        </Link>
+                        </Link> */}
                         {user?.role === 'admin' && (
                             <>
                                 <Link 
