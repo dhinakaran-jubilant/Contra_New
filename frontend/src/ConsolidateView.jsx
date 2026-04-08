@@ -149,7 +149,7 @@ const ConsolidateView = ({ user }) => {
 
     return (
         <>
-            <main className="flex-1 overflow-y-auto bg-background-light dark:bg-background-dark p-8">
+            <main className="flex-1 overflow-y-auto scrollbar-slim bg-background-light dark:bg-background-dark p-8">
                 <div className="max-w-6xl mx-auto flex flex-col gap-8">
                     {/* Header Section */}
                     <div className="flex flex-col gap-2">

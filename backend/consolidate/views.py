@@ -97,6 +97,14 @@ class ConsolidateView(APIView):
                 # Prepare final download URL
                 encoded_path = base64.b64encode(str(file_path).encode()).decode()
                 download_url = f"/api/download-file/?file_path={encoded_path}"
+                
+                base_name = os.path.basename(file_path)
+                import re
+                if not re.search(r'-CONSOLIDATED', base_name, re.IGNORECASE):
+                    name_part, ext_part = os.path.splitext(base_name)
+                    final_name = f"{name_part}-CONSOLIDATED{ext_part}"
+                else:
+                    final_name = base_name
 
                 # Update Google Sheets with 'Final' stats
                 try:
@@ -139,7 +147,7 @@ class ConsolidateView(APIView):
                     "action": "charts",
                     "download_files": [
                         {
-                            "file_name": os.path.basename(file_path),
+                            "file_name": final_name,
                             "download_url": download_url
                         }
                     ],
