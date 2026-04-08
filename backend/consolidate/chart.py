@@ -372,14 +372,14 @@ def create_chart_from_pivot(file_path):
                     print(f"  [Skip] No data found for '{chart_type}' in sheet '{pivot_name}'")
                     continue
 
-                # Pre-process Temp Sheet: remove "Description" column
+                # Pre-process Temp Sheet: remove unwanted columns
                 try:
                     td_cols = temp_ws.UsedRange.Columns.Count
-                    for c in range(1, td_cols + 1):
+                    for c in range(td_cols, 0, -1):
                         h_val = str(temp_ws.Cells(1, c).Value).strip().upper()
-                        if "DESCRIPTION" in h_val:
+                        clean_h = h_val.replace(".", "").replace(" ", "")
+                        if "DESCRIPTION" in h_val or "BALANCE" in h_val or clean_h == "SNO" or clean_h == "SLNO":
                             temp_ws.Columns(c).Delete()
-                            break
                 except:
                     pass
 
