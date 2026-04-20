@@ -122,7 +122,16 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
             TableDestination=pivot_sheet.Cells(7, 1),
             TableName="MyPivot",
         )
-        pivot_table.PivotCache.SaveData = True
+        try:
+            # In some win32com environments, PivotCache is a method
+            pivot_table.PivotCache().SaveData = True
+        except (AttributeError, TypeError):
+            try:
+                # In others, it is a property
+                pivot_table.PivotCache.SaveData = True
+            except Exception:
+                pass
+        
         pivot_table.EnableDrilldown = True
 
         # ── Configure pivot fields ────────────────────────────────────────
