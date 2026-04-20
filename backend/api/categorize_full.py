@@ -107,11 +107,9 @@ def categorize_desc_text_row(desc, category, cr=None, dr=None):
 
     # --- Re-categorization rules ---
     if cat_str in ('ENTERTAINMENT', 'CLOTHING', 'PERSONAL CARE', 'FOOD', 'ALCOHOL', 'CASH BACK', 'LOGISTICS', 'MEDICAL', 'SUBSIDY', 'VEHICLE SERVICING'):
-        amt = abs(float(dr)) if has_dr else abs(float(cr)) if has_cr else 0
-        return 'COMPANY NAME' if amt < 50_000 else cat_str
+        return cat_str
     elif cat_str in ('FUEL', 'TRAVEL', 'UTILITIES'):
-        amt = abs(float(dr)) if has_dr else abs(float(cr)) if has_cr else 0
-        return 'EXPENSE' if amt < 50_000 else cat_str
+        return 'EXPENSE'
     
     if cat_str == 'REVERSAL' and not has_neft and not has_rtgs: return 'REVERSAL'
 
@@ -388,6 +386,22 @@ def categorize_return_type(df, bank_code=None):
     return df
 
 def categorize_type(df, type_value, acc_type):
+    # --- Group-sum logic for specific categories ---
+    target_cats = {'ENTERTAINMENT', 'CLOTHING', 'PERSONAL CARE', 'FOOD', 'ALCOHOL', 
+                   'CASH BACK', 'LOGISTICS', 'MEDICAL', 'SUBSIDY', 'VEHICLE SERVICING'}
+    
+    # Ensure DR is numeric for calculation
+    dr_vals = pd.to_numeric(df['DR'], errors='coerce').fillna(0).abs()
+    
+    # Check if we have any target categories before grouping to save time
+    if df['Category'].str.upper().isin(target_cats).any():
+        # Group by Category and sum DR values
+        cat_sum_series = df.groupby('Category')[dr_vals.name].transform('sum')
+        
+        # Apply threshold: if sum < 50,000, change to COMPANY NAME
+        mask = df['Category'].str.upper().isin(target_cats) & (cat_sum_series < 50000)
+        df.loc[mask, 'Category'] = 'COMPANY NAME'
+
     cat_upper = df['Category'].str.upper()
     df['TYPE'] = df.get('TYPE', '')
     df.loc[cat_upper == 'CASH DEPOSIT', 'TYPE'] = type_value
