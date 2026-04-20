@@ -117,10 +117,13 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
             SourceType=1,
             SourceData=f"'{ws.Name}'!{source_range.Address}",
         )
+        pivot_cache.SaveData = True
+
         pivot_table = pivot_cache.CreatePivotTable(
             TableDestination=pivot_sheet.Cells(7, 1),
             TableName="MyPivot",
         )
+        pivot_table.EnableDrilldown = True
 
         # ── Configure pivot fields ────────────────────────────────────────
         type_field     = pivot_table.PivotFields("TYPE")
