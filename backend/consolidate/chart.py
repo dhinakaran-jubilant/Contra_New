@@ -158,12 +158,12 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name, global_months=None):
         # Bulk write items for this category
         data_start_row = current_row
         
-        # Multiply DR/CR values by 100,000 before bulk write
+        # Ensure DR/CR values are numbers
         for r in ordered_items:
             if dr_idx is not None and len(r) > dr_idx:
-                r[dr_idx] = to_number(r[dr_idx]) * 100000
+                r[dr_idx] = to_number(r[dr_idx])
             if cr_idx is not None and len(r) > cr_idx:
-                r[cr_idx] = to_number(r[cr_idx]) * 100000
+                r[cr_idx] = to_number(r[cr_idx])
 
         data_range = master_ws.Range(master_ws.Cells(current_row, 1), master_ws.Cells(current_row + len(ordered_items) - 1, len(headers)))
         data_range.Value = ordered_items

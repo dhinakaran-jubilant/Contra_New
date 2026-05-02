@@ -135,7 +135,7 @@ def _build_cons_sheet_logic(ws, months, pivot_sheets, account_map, start_row, st
                 anchor = wb.Worksheets(sheet).PivotTables(1).TableRange2.Cells(1,1).Address
                 # Formula: If value is 0 or error, show NIL. (Simplified)
                 get_pivot_args = f'"Sum of DR",\'{sheet}\'!{anchor},"MONTH","{month_label}","TYPE","{type1}"'
-                formula = f'=IFERROR(IF(GETPIVOTDATA({get_pivot_args})=0, "NIL", GETPIVOTDATA({get_pivot_args}) * 100000), "NIL")'
+                formula = f'=IFERROR(IF(GETPIVOTDATA({get_pivot_args})=0, "NIL", GETPIVOTDATA({get_pivot_args})), "NIL")'
                 row_data.append(formula)
             except:
                 row_data.append("NIL")
@@ -149,7 +149,7 @@ def _build_cons_sheet_logic(ws, months, pivot_sheets, account_map, start_row, st
                 anchor = wb.Worksheets(sheet).PivotTables(1).TableRange2.Cells(1,1).Address
                 # Formula: If value is 0 or error, show NIL. (Simplified)
                 get_pivot_args = f'"Sum of CR",\'{sheet}\'!{anchor},"MONTH","{month_label}","TYPE","{type2}"'
-                formula = f'=IFERROR(IF(GETPIVOTDATA({get_pivot_args})=0, "NIL", GETPIVOTDATA({get_pivot_args}) * 100000), "NIL")'
+                formula = f'=IFERROR(IF(GETPIVOTDATA({get_pivot_args})=0, "NIL", GETPIVOTDATA({get_pivot_args})), "NIL")'
                 row_data.append(formula)
             except:
                 row_data.append("NIL")
