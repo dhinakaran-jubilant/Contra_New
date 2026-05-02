@@ -114,6 +114,25 @@ def _safe_name_from_key(key: str) -> str:
     return "-".join(parts)
 
 
+def _mask_account_number(acc_num) -> str:
+    """Mask all but the last 4 digits of an account number string."""
+    s = str(acc_num or "").strip()
+    if not s or s.lower() == 'nil':
+        return s
+    if len(s) <= 4:
+        return s
+    return "X" * (len(s) - 4) + s[-4:]
+
+
+def _get_main_account_number(ws) -> str:
+    """Extract the primary account number from the Analysis sheet's Summary Info block."""
+    for row in ws.iter_rows(min_row=1, max_row=20, min_col=1, max_col=3):
+        header = str(row[1].value or "").strip() # Col B
+        if header == "Account Number":
+            return str(row[2].value or "").strip() # Col C
+    return None
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def copy_sheet_with_style(src_ws, wb_out, new_title: str = "Analysis"):
@@ -124,7 +143,15 @@ def copy_sheet_with_style(src_ws, wb_out, new_title: str = "Analysis"):
         for cell in row:
             if isinstance(cell, MergedCell):
                 continue
-            dcell = dest_ws.cell(row=cell.row, column=cell.column, value=cell.value)
+            
+            val = cell.value
+            # Mask Account Number in Summary Info table (Column B header = 'Account Number', Column C = value)
+            if cell.column == 3: # Col C
+                header_val = str(src_ws.cell(row=cell.row, column=2).value or "").strip()
+                if header_val == "Account Number":
+                    val = _mask_account_number(val)
+
+            dcell = dest_ws.cell(row=cell.row, column=cell.column, value=val)
             _copy_cell_style(cell, dcell)
 
     for r_idx, r_dim in src_ws.row_dimensions.items():
@@ -144,17 +171,53 @@ def copy_sheet_with_style(src_ws, wb_out, new_title: str = "Analysis"):
     return dest_ws
 
 
-def append_sheet_with_style(src_ws, dest_ws, gap_rows: int = 2, col_offset: int = 0):
+def append_sheet_with_style(src_ws, dest_ws, gap_rows: int = 2, col_offset: int = 0, override_acc_num: str = None):
     """Append *src_ws* data (with styles) after the existing content of *dest_ws*."""
     row_offset = dest_ws.max_row + gap_rows
 
+    # Identify sensitive columns to clear or mask (e.g. from 'Statements Considered')
+    to_clear = {"Address as in Statement", "Mobile as in Statement",
+                "Landline as in Statement", "Email as in Statement", "PAN as in Statement"}
+    to_mask = {"Account No"}
+    
+    cols_to_clear = set()
+    cols_to_mask  = set()
+    header_row_idx = -1
+
+    # Search for headers in the first 10 rows to identify columns
+    for row_idx, row in enumerate(src_ws.iter_rows(min_row=1, max_row=10), start=1):
+        for cell in row:
+            val = str(cell.value or "").strip()
+            if val in to_clear:
+                cols_to_clear.add(cell.column)
+                if header_row_idx == -1: header_row_idx = row_idx
+            elif val in to_mask:
+                cols_to_mask.add(cell.column)
+                if header_row_idx == -1: header_row_idx = row_idx
+
     for row in src_ws.iter_rows():
+        # Skip empty rows (often present at the end of Excel sheets due to formatting)
+        # We check if at least one of the first three columns has data to consider it a valid row
+        if not any(c.value for c in row[:3]) and row[0].row > header_row_idx and header_row_idx != -1:
+            continue
+
         for cell in row:
             if isinstance(cell, MergedCell):
                 continue
             target_row = row_offset + cell.row - 1
             target_col = cell.column + col_offset
-            dcell = dest_ws.cell(row=target_row, column=target_col, value=cell.value)
+            
+            # Extract value, but clear or mask if it's sensitive data below the header
+            val = cell.value
+            if cell.row > header_row_idx:
+                if cell.column in cols_to_clear:
+                    val = None
+                elif cell.column in cols_to_mask:
+                    # Use override_acc_num if provided, otherwise use original value
+                    base_val = override_acc_num if override_acc_num is not None else val
+                    val = _mask_account_number(base_val)
+                
+            dcell = dest_ws.cell(row=target_row, column=target_col, value=val)
             _copy_cell_style(cell, dcell)
 
     for r_idx, r_dim in src_ws.row_dimensions.items():
@@ -311,10 +374,16 @@ def save_matched_with_styles(
                             cell.fill = row_fill
 
             # ── Analysis + Statements sheets ─────────────────────────────────
-            analysis_ws = copy_sheet_with_style(analysis_storage[key], wb_out, new_title="ANALYSIS")
-            # copy_sheet_with_style already sets column widths; no need to repeat here
+            main_acc_num = _get_main_account_number(analysis_storage[key])
+            analysis_ws  = copy_sheet_with_style(analysis_storage[key], wb_out, new_title="ANALYSIS")
             _reorder_sheet_first(wb_out, analysis_ws)
-            append_sheet_with_style(statement_storage[key], analysis_ws, gap_rows=3, col_offset=1)
+            append_sheet_with_style(
+                statement_storage[key], 
+                analysis_ws, 
+                gap_rows=3, 
+                col_offset=1, 
+                override_acc_num=main_acc_num
+            )
 
         saved_files_info.append({
             'file_path':    str(filename),
