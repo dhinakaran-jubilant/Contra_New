@@ -23,8 +23,12 @@ class ConsolidateView(APIView):
 
                 # 1. Create a unique temporary directory
                 temp_id = str(uuid.uuid4())
-                temp_dir = Path("temp_consolidate") / temp_id
+                # Use absolute path for temp directory to avoid issues with CWD
+                base_dir = Path(__file__).resolve().parent.parent
+                temp_dir = base_dir / "temp_consolidate" / temp_id
                 temp_dir.mkdir(parents=True, exist_ok=True)
+                
+                print(f"DEBUG: Processing merge action. Temp dir: {temp_dir}")
 
                 file_paths = []
                 # 2. Save uploaded files
@@ -151,4 +155,7 @@ class ConsolidateView(APIView):
                 return Response({"error": f"Unknown action: {action}"}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
+            import traceback
+            print(f"ERROR in ConsolidateView: {str(e)}")
+            traceback.print_exc()
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

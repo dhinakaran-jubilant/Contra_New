@@ -132,9 +132,11 @@ const ConsolidateView = ({ user }) => {
             setShowSuccessModal(true);
             setSelectedFiles([]);
         } catch (error) {
-            setErrorMessage(error.message || 'Something went wrong. Please try again.');
+            console.error('Consolidation error:', error);
+            const stepName = processingStatus || 'Process';
+            setErrorMessage(`[${stepName}] ${error.message || 'Something went wrong. Please try again.'}`);
             if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
-            errorTimerRef.current = setTimeout(() => setErrorMessage(''), 8000);
+            errorTimerRef.current = setTimeout(() => setErrorMessage(''), 10000);
         } finally {
             setIsProcessing(false);
             setProcessingStatus('');

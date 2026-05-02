@@ -137,13 +137,14 @@ def merge_excel_files(file_paths):
         print(f"Base file: {os.path.basename(main_path)}")
 
         # 1.5 Create charts for base file and other files BEFORE merging
+        # STEP 2: Generate Charts using the same Excel instance
         from .chart import create_chart_from_pivot
         print(f"Creating charts for base file: {os.path.basename(main_path)}")
-        create_chart_from_pivot(main_path)
+        create_chart_from_pivot(main_path, excel=excel)
         
         for op in other_paths:
             print(f"Creating charts for other file: {os.path.basename(op)}")
-            create_chart_from_pivot(op)
+            create_chart_from_pivot(op, excel=excel)
 
         main_wb = excel.Workbooks.Open(main_path)
         main_analysis = None

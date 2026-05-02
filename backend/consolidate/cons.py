@@ -42,31 +42,33 @@ def get_months_from_xns(wb):
         try:
             # 🚀 Bulk Read: Get the entire used data at once
             data = sheet.UsedRange.Value
-            if not data or len(data) < 2:
+            if not data:
+                continue
+            
+            # Handle single cell case (win32com returns a single value, not a tuple, for single cell)
+            if not isinstance(data, (list, tuple)):
+                data = ((data,),)
+                
+            if len(data) < 2:
                 continue
 
             # Identify the Date column (usually B, which is index 1)
-            # We'll check the first 5 rows for a 'DATE' header if possible, 
-            # otherwise assume column B.
             date_col_idx = 1
             for r_idx in range(min(5, len(data))):
                 row = data[r_idx]
+                if not row: continue
                 if any("DATE" in str(cell).upper() for cell in row if cell):
                     for idx, cell in enumerate(row):
-                        if "DATE" in str(cell).upper():
+                        if cell and "DATE" in str(cell).upper():
                             date_col_idx = idx
                             break
                     break
 
             for row in data:
-                if len(row) > date_col_idx:
+                if row and len(row) > date_col_idx:
                     dt = row[date_col_idx]
                     if isinstance(dt, datetime):
                         months.add((dt.year, dt.month))
-                    elif isinstance(dt, (str, float, int)) and dt != "":
-                        # Try to parse if it's not already a datetime object
-                        # (Excel sometimes returns floats for dates)
-                        pass # win32com usually returns datetime or None/Empty
         except Exception as e:
             print(f"Error reading {name}: {e}")
             continue
@@ -235,6 +237,8 @@ def create_cons_sheet(file_path):
         for p_name in all_pivots:
             try:
                 ws_ref = wb.Worksheets(p_name)
+                if ws_ref.PivotTables().Count == 0:
+                    continue
                 pt = ws_ref.PivotTables(1)
                 month_field = pt.PivotFields("MONTH")
                 for item in month_field.PivotItems():
@@ -243,7 +247,8 @@ def create_cons_sheet(file_path):
                         m_name = str(item.Name)
                         if m_name not in months:
                             months.append(m_name)
-            except:
+            except Exception as e:
+                print(f"Error extracting months from pivot {p_name}: {e}")
                 continue
         
         if not months:

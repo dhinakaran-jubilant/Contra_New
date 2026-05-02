@@ -39,6 +39,14 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name, global_months=None):
 
     headers = [str(h).strip() if h is not None else "" for h in data[0]]
     rows = [list(r) for r in data[1:]] if data and len(data) > 1 else []
+    
+    # Ensure Date is the 1st column
+    date_idx = next((i for i, h in enumerate(headers) if "DATE" in h.upper()), None)
+    if date_idx is not None and date_idx != 0:
+        new_order = [date_idx] + [i for i in range(len(headers)) if i != date_idx]
+        headers = [headers[i] for i in new_order]
+        rows = [[r[i] for i in new_order] for r in rows]
+
     col_map = {h.upper(): i for i, h in enumerate(headers)}
     
     # Lenient header search
@@ -223,16 +231,22 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name, global_months=None):
     except:
         pass
 
-def create_chart_from_pivot(file_path):
-    """Extracts pivot table details into specialized summary 'chart' sheets."""
+def create_chart_from_pivot(file_path, excel=None):
+    """
+    Reads Pivot data and inserts charts into the Excel workbook.
+    """
     if not os.path.exists(file_path):
+        print(f"File not found: {file_path}")
         return
 
     pythoncom.CoInitialize()
-    excel = None
+    should_quit = False
     wb = None
     try:
-        excel = win32.DispatchEx("Excel.Application")
+        if excel is None:
+            excel = win32.DispatchEx("Excel.Application")
+            should_quit = True
+        
         excel.Visible = False
         excel.DisplayAlerts = False
         excel.ScreenUpdating = False
@@ -473,6 +487,23 @@ def create_chart_from_pivot(file_path):
                                     if h_str == "DR": dr_idx = idx
                                     if h_str == "CR": cr_idx = idx
                         
+                        # Ensure Date is the 1st column
+                        if date_idx is not None and date_idx != 0:
+                            new_order = [date_idx] + [i for i in range(len(h_vals)) if i != date_idx]
+                            h_vals = [h_vals[i] for i in new_order]
+                            rows_data = [[r[i] for i in new_order] for r in rows_data]
+                            # Update indices
+                            for idx, h in enumerate(h_vals):
+                                if h:
+                                    h_str = str(h).upper().strip()
+                                    if "DATE" in h_str: date_idx = idx
+                                    if h_str in ("TYPE", "CATEGORY", "CATEG", "CATG", "CAT", "PARTICULARS", "DESCRIPTION", "DESC"): cat_idx = idx
+                                    if h_str == "DR": dr_idx = idx
+                                    if h_str == "CR": cr_idx = idx
+
+                        # Re-write Header (now potentially reordered)
+                        header_range.Value = h_vals
+
                         for r in rows_data:
                             if dr_idx is not None and len(r) > dr_idx:
                                 r[dr_idx] = to_number(r[dr_idx])
@@ -553,15 +584,15 @@ def create_chart_from_pivot(file_path):
         print("Charts created successfully.")
     finally:
         if wb:
-            try: wb.Close()
-            except: pass
-        if excel:
             try:
-                excel.Calculation = -4105
-                excel.ScreenUpdating = True
-                excel.EnableEvents = True
+                wb.Close(SaveChanges=True)
+            except:
+                pass
+        if excel and should_quit:
+            try:
                 excel.Quit()
-            except: pass
+            except:
+                pass
         pythoncom.CoUninitialize()
 
 if __name__ == "__main__":
