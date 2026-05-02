@@ -166,6 +166,12 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
         # ── Configuration ─────────────────────────────────────────────────
         pivot_table.EnableDrilldown = True
 
+        # Hide (blank) column but keep blank rows
+        try:
+            month_field.PivotItems("(blank)").Visible = False
+        except:
+            pass
+
         # ── Month ordering (preserve sheet order, deduplicated) ───────────
         month_raw   = ws.Range(ws.Cells(2, 3), ws.Cells(last_row, 3)).Value
         month_order = list(dict.fromkeys(
