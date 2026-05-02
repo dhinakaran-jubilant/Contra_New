@@ -113,7 +113,7 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
 
         # Use the explicit string format to avoid win32com 'str' object is not callable errors
         # Format: 'SheetName'!$C:$I
-        source_addr = f"'{ws.Name}'!$C:$I"
+        source_addr = f"'{ws.Name}'!$B:$I"
         
         pivot_cache = wb.PivotCaches().Create(
             SourceType=1,
