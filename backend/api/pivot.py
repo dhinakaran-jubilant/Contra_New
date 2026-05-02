@@ -100,8 +100,6 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
 
         # ── Data range ────────────────────────────────────────────────────
         last_row = ws.Cells(ws.Rows.Count, 1).End(-4162).Row
-        last_col = ws.Cells(1, ws.Columns.Count).End(-4159).Column
-        source_range = ws.Range(ws.Cells(1, 2), ws.Cells(last_row, last_col - 1))
 
         # ── Delete old pivot sheet if present ─────────────────────────────
         for sheet in wb.Sheets:
@@ -109,28 +107,50 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
                 sheet.Delete()
                 break
 
-        # ── Create pivot sheet + cache + table ────────────────────────────
+        # ── Create pivot sheet + Table for Source Data ────────────────────
         pivot_sheet = wb.Sheets.Add(Before=ws)
         pivot_sheet.Name = pivot_sheet_name
 
+        # Use the explicit string format to avoid win32com 'str' object is not callable errors
+        # Format: 'SheetName'!$C:$I
+        source_addr = f"'{ws.Name}'!$C:$I"
+        
         pivot_cache = wb.PivotCaches().Create(
             SourceType=1,
-            SourceData=f"'{ws.Name}'!{source_range.Address}",
+            SourceData=source_addr,
         )
+        try:
+            pivot_cache.RefreshOnFileOpen = True
+            pivot_cache.MissingItemsLimit = 0 # xlMissingItemsNone
+        except:
+            pass
 
         pivot_table = pivot_cache.CreatePivotTable(
             TableDestination=pivot_sheet.Cells(7, 1),
             TableName="MyPivot",
         )
+        
+        # ── Enable Automatic Calculation before refresh ────────────────────
         try:
-            # In some win32com environments, PivotCache is a method
-            pivot_table.PivotCache().SaveData = True
-        except (AttributeError, TypeError):
+            excel.Calculation = -4105 # xlCalculationAutomatic
+        except:
+            pass
+
+        # ── Force Refresh ──────────────────────────────────────────────────
+        try:
+            pc = pivot_table.PivotCache()
+            pc.Refresh()
+        except:
             try:
-                # In others, it is a property
-                pivot_table.PivotCache.SaveData = True
-            except Exception:
+                pc = pivot_table.PivotCache
+                pc.Refresh()
+            except:
                 pass
+        
+        try:
+            pivot_table.RefreshTable()
+        except:
+            pass
         
         pivot_table.EnableDrilldown = True
 
@@ -143,12 +163,8 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
         category_field.Orientation = 1;  category_field.Position = 2
         month_field.Orientation    = 2;  month_field.Position    = 1
 
-        # Hide (blank) items
-        for fld in [type_field, category_field, month_field]:
-            try:
-                fld.PivotItems("(blank)").Visible = False
-            except Exception:
-                pass
+        # ── Configuration ─────────────────────────────────────────────────
+        pivot_table.EnableDrilldown = True
 
         # ── Month ordering (preserve sheet order, deduplicated) ───────────
         month_raw   = ws.Range(ws.Cells(2, 3), ws.Cells(last_row, 3)).Value
@@ -240,7 +256,13 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
 
         # ── Borders on pivot table ────────────────────────────────────────
         pivot_range = pivot_table.TableRange2
-        _apply_borders(pivot_range, [7, 8, 9, 10, 11, 12])
+        try:
+            pivot_range.Borders.LineStyle = 1 # xlContinuous
+            pivot_range.Borders.Weight    = 2 # xlThin
+            pivot_range.Borders.Color     = 0 # Black
+        except:
+            # Fallback if shorthand fails
+            _apply_borders(pivot_range, [7, 8, 9, 10, 11, 12])
 
         # ── Title block ───────────────────────────────────────────────────
         title_range = pivot_sheet.Range("C2:G4")
