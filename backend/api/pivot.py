@@ -101,7 +101,7 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
         # ── Data range ────────────────────────────────────────────────────
         last_row = ws.Cells(ws.Rows.Count, 1).End(-4162).Row
         last_col = ws.Cells(1, ws.Columns.Count).End(-4159).Column
-        source_range = ws.Range(ws.Cells(1, 2), ws.Cells(ws.Rows.Count, last_col - 1))
+        source_range = ws.Range(ws.Cells(1, 2), ws.Cells(last_row, last_col - 1))
 
         # ── Delete old pivot sheet if present ─────────────────────────────
         for sheet in wb.Sheets:
@@ -142,6 +142,13 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
         type_field.Orientation     = 1;  type_field.Position     = 1
         category_field.Orientation = 1;  category_field.Position = 2
         month_field.Orientation    = 2;  month_field.Position    = 1
+
+        # Hide (blank) items
+        for fld in [type_field, category_field, month_field]:
+            try:
+                fld.PivotItems("(blank)").Visible = False
+            except Exception:
+                pass
 
         # ── Month ordering (preserve sheet order, deduplicated) ───────────
         month_raw   = ws.Range(ws.Cells(2, 3), ws.Cells(last_row, 3)).Value
@@ -188,12 +195,7 @@ def create_pivot(file_path, sheet_name, limit=None, excel=None) -> None:
         col_count = pivot_range.Columns.Count
         row_count = pivot_range.Rows.Count
 
-        for i in range(col_count):
-            w = 19 if i == 0 else 28 if i == 1 else 10
-            pivot_sheet.Columns(start_col + i).ColumnWidth = w
-        # Override last two columns
-        pivot_sheet.Columns(start_col + col_count - 2).ColumnWidth = 13
-        pivot_sheet.Columns(start_col + col_count - 1).ColumnWidth = 13
+        pivot_range.Columns.AutoFit()
 
         # ── Grouped row coloring for performance ──────────────────────
         type_values = pivot_range.Columns(1).Value

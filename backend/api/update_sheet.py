@@ -5,6 +5,7 @@ from datetime import datetime
 import traceback
 import gspread
 import os
+import re
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 _KEY_FILE        = r"../robust-shadow-471605-k1-6152c9ae90ff.json"
@@ -243,17 +244,18 @@ def update_google_sheets_final(consolidated_path: str) -> bool:
         sheet       = gc.open(_SPREADSHEET).get_worksheet(_SHEET_MASTER)
         rows        = sheet.get_all_values()
         
-        updates = []
-        for i, row in enumerate(rows[1:], start=2): # skip header
-            if len(row) < 5: continue
-            file_name_gs = row[4].upper() # Column E: File Name
-            
-            for key, stats in final_stats.items():
-                if key in file_name_gs:
+        for key, stats in final_stats.items():
+            key_clean = re.sub(r'[^A-Z0-9]', '', str(key).upper())
+            for i, row in enumerate(rows[1:], start=2): # skip header
+                if len(row) < 5: continue
+                file_name_gs = str(row[4]).upper() # Column E: File Name
+                file_name_gs_clean = re.sub(r'[^A-Z0-9]', '', file_name_gs)
+                
+                if key_clean in file_name_gs_clean:
                     # Found a match! Calculate percentages
                     try:
-                        c_before = int(row[6]) # Col G
-                        r_before = int(row[7]) # Col H
+                        c_before = int(row[6]) if row[6] else 0 # Col G
+                        r_before = int(row[7]) if row[7] else 0 # Col H
                         total_f  = stats["total"]
                         contra_f = stats["contra"]
                         return_f = stats["return"]
@@ -278,6 +280,7 @@ def update_google_sheets_final(consolidated_path: str) -> bool:
                             f"{r_pct:.2f}%"
                         ]])
                         print(f"   ✅ Updated 'Final' stats for: {file_name_gs}")
+                        break # Move to next key once match found for this key
                     except Exception as e:
                         print(f"   ❌ Error updating row {i}: {e}")
 

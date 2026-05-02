@@ -106,13 +106,6 @@ class ConsolidateView(APIView):
                 else:
                     final_name = base_name
 
-                # Update Google Sheets with 'Final' stats
-                try:
-                    from api.update_sheet import update_google_sheets_final
-                    print(f"📊 Triggering final Google Sheets update for: {file_path}")
-                    update_google_sheets_final(file_path)
-                except Exception as gs_err:
-                    print(f"⚠️ Google Sheets final update failed: {gs_err}")
 
                 # Log processing details for database: Update existing logs from Contra Match with Final Counts
                 try:

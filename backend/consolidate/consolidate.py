@@ -56,8 +56,16 @@ def validate_and_find_main(excel, file_paths):
     if not sheet_counts:
         return False, "No valid files found.", None, [], 0, 0
 
-    max_c = max(c for _, c in sheet_counts)
-    main_path = next(p for p, c in sheet_counts if c == max_c)
+    main_path = None
+    for p, _ in sheet_counts:
+        if "final" in os.path.basename(p).lower():
+            main_path = p
+            break
+            
+    if not main_path:
+        max_c = max(c for _, c in sheet_counts)
+        main_path = next(p for p, c in sheet_counts if c == max_c)
+        
     others = [p for p, _ in sheet_counts if p != main_path]
 
     return True, "", main_path, others, last_p, last_x
@@ -127,6 +135,16 @@ def merge_excel_files(file_paths):
             return None
 
         print(f"Base file: {os.path.basename(main_path)}")
+
+        # 1.5 Create charts for base file and other files BEFORE merging
+        from .chart import create_chart_from_pivot
+        print(f"Creating charts for base file: {os.path.basename(main_path)}")
+        create_chart_from_pivot(main_path)
+        
+        for op in other_paths:
+            print(f"Creating charts for other file: {os.path.basename(op)}")
+            create_chart_from_pivot(op)
+
         main_wb = excel.Workbooks.Open(main_path)
         main_analysis = None
         try: main_analysis = main_wb.Sheets("ANALYSIS")
@@ -171,37 +189,15 @@ def merge_excel_files(file_paths):
                 main_sheet_names = {s.Name.upper() for s in main_wb.Sheets}
                 insert_pos = main_wb.Sheets("ANALYSIS").Index + 1 if main_analysis else 1
                 
-                other_has_charts = False
-                for s in other_wb.Sheets:
-                    su = s.Name.upper()
-                    if any(su == c for c in chart_categories):
-                        other_has_charts = True
-                        break
-                
                 for sheet in other_wb.Sheets:
                     sn_upper = sheet.Name.upper()
-                    is_chart = any(sn_upper == c for c in chart_categories)
                     
                     if "PIVOT" in sn_upper or "XNS" in sn_upper:
                         if sn_upper not in main_sheet_names:
                             sheet.Copy(Before=main_wb.Sheets(insert_pos))
                             main_sheet_names.add(sn_upper)
                             insert_pos += 1
-                        if "PIVOT" in sn_upper and other_has_charts:
-                            pivots_with_charts.add(sn_upper)
-                    elif is_chart:
-                        # Append chart to main_wb
-                        try:
-                            main_ws = main_wb.Sheets(sheet.Name)
-                            # Append File B's chart data at bottom of File A's chart
-                            ur = sheet.UsedRange
-                            if ur.Rows.Count > 1 or (ur.Rows.Count == 1 and ur.Cells(1,1).Value is not None):
-                                last_row_main = main_ws.Cells(main_ws.Rows.Count, 1).End(-4162).Row
-                                ur.Copy(main_ws.Cells(last_row_main + 3, 1))
-                        except:
-                            # Main WB doesn't have this chart sheet. Copy it!
-                            sheet.Copy(Before=main_wb.Sheets(insert_pos))
-                            insert_pos += 1
+
             finally:
                 other_wb.Close(False)
 

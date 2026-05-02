@@ -367,9 +367,9 @@ def categorize_return_type(df, bank_code=None):
         elif cat_str == 'BOUNCED I/W CHEQUE CHARGES' and has_dr and not has_outward: df.at[idx, 'Category'] = 'I/W CHQ RTN CHGS'
         elif cat_str == 'BOUNCED I/W ECS CHARGES' and has_dr and not has_outward: df.at[idx, 'Category'] = 'I/W ECS RTN CHGS'
         elif cat_str == 'TRANSFER OUT' and has_dr:
-            if has_outward and 'IMPS' not in desc_str: df.at[idx, 'Category'] = 'O/W CHQ RTN CHGS' if has_charge else 'O/W CHQ RTN'
+            if has_outward and has_rtn and 'IMPS' not in desc_str: df.at[idx, 'Category'] = 'O/W CHQ RTN CHGS' if has_charge else 'O/W CHQ RTN'
         elif cat_str == 'TRANSFER IN' and has_cr:
-            if has_inward and 'IMPS' not in desc_str:
+            if has_inward and has_rtn and 'IMPS' not in desc_str:
                 f_txt = next((k for k in ('RTGS', 'NEFT') if k in desc_str), None)
                 if f_txt: df.at[idx, 'Category'] = f'I/W {f_txt} RTN' if not has_charge else f'I/W {f_txt} RTN CHGS'
                 else: df.at[idx, 'Category'] = 'I/W CHQ RTN CHGS' if has_charge else 'I/W CHQ RTN'

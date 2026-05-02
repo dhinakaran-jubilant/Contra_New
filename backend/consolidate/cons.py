@@ -77,13 +77,11 @@ def get_months_from_xns(wb):
     months = sorted(months)
     labels = []
     if not months: return []
-    first_year = months[0][0]
-
     for y, m in months:
         d = datetime(y, m, 1)
         label = d.strftime("%b").upper()
-        if y != first_year:
-            label = f"{label}({str(y)[-2:]})"
+        # Always show year for all months
+        label = f"{label}({str(y)[-2:]})"
         labels.append(label)
     return labels
 
@@ -137,7 +135,7 @@ def _build_cons_sheet_logic(ws, months, pivot_sheets, account_map, start_row, st
                 anchor = wb.Worksheets(sheet).PivotTables(1).TableRange2.Cells(1,1).Address
                 # Formula: If value is 0 or error, show NIL. (Simplified)
                 get_pivot_args = f'"Sum of DR",\'{sheet}\'!{anchor},"MONTH","{month_label}","TYPE","{type1}"'
-                formula = f'=IFERROR(IF(GETPIVOTDATA({get_pivot_args})=0, "NIL", GETPIVOTDATA({get_pivot_args})), "NIL")'
+                formula = f'=IFERROR(IF(GETPIVOTDATA({get_pivot_args})=0, "NIL", GETPIVOTDATA({get_pivot_args}) * 100000), "NIL")'
                 row_data.append(formula)
             except:
                 row_data.append("NIL")
@@ -151,7 +149,7 @@ def _build_cons_sheet_logic(ws, months, pivot_sheets, account_map, start_row, st
                 anchor = wb.Worksheets(sheet).PivotTables(1).TableRange2.Cells(1,1).Address
                 # Formula: If value is 0 or error, show NIL. (Simplified)
                 get_pivot_args = f'"Sum of CR",\'{sheet}\'!{anchor},"MONTH","{month_label}","TYPE","{type2}"'
-                formula = f'=IFERROR(IF(GETPIVOTDATA({get_pivot_args})=0, "NIL", GETPIVOTDATA({get_pivot_args})), "NIL")'
+                formula = f'=IFERROR(IF(GETPIVOTDATA({get_pivot_args})=0, "NIL", GETPIVOTDATA({get_pivot_args}) * 100000), "NIL")'
                 row_data.append(formula)
             except:
                 row_data.append("NIL")
@@ -232,26 +230,24 @@ def create_cons_sheet(file_path):
         if not all_pivots:
             return
 
-        # 2. Extract Month Labels from the first XNS/Pivot to ensure perfect matching
-        # Instead of generating them, we'll read the labels used in the PivotTable MONTH field.
-        # We MUST follow the position (order) of the items as shown in the pivot.
-        months_with_pos = []
-        try:
-            ws_ref = wb.Worksheets(all_pivots[0])
-            pt = ws_ref.PivotTables(1)
-            month_field = pt.PivotFields("MONTH")
-            
-            for item in month_field.PivotItems():
-                # Only include visible items that are not (blank)
-                if item.Visible and "(blank)" not in str(item.Name).lower():
-                    months_with_pos.append((item.Position, str(item.Name)))
-            
-            # Sort by Position (Excel starts position at 1)
-            months_with_pos.sort(key=lambda x: x[0])
-            months = [m[1] for m in months_with_pos]
-        except Exception as e:
-            print(f"Error reading month items from pivot: {e}")
-            # Fallback to the existing method if reading items fails
+        # 2. Extract Month Labels from ALL Pivot sheets to ensure the union is captured
+        months = []
+        for p_name in all_pivots:
+            try:
+                ws_ref = wb.Worksheets(p_name)
+                pt = ws_ref.PivotTables(1)
+                month_field = pt.PivotFields("MONTH")
+                for item in month_field.PivotItems():
+                    # Only include visible items that are not (blank)
+                    if item.Visible and "(blank)" not in str(item.Name).lower():
+                        m_name = str(item.Name)
+                        if m_name not in months:
+                            months.append(m_name)
+            except:
+                continue
+        
+        if not months:
+            # Fallback to scanning XNS sheets directly if pivots are empty or missing MONTH field
             months = get_months_from_xns(wb)
 
         if not months:

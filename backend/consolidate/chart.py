@@ -4,6 +4,7 @@ from collections import defaultdict
 import pythoncom
 import os
 import time
+import re
 
 def to_number(val):
     if val is None:
@@ -37,7 +38,7 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name, global_months=None):
         return
 
     headers = [str(h).strip() if h is not None else "" for h in data[0]]
-    rows = data[1:]
+    rows = [list(r) for r in data[1:]] if data and len(data) > 1 else []
     col_map = {h.upper(): i for i, h in enumerate(headers)}
     
     # Lenient header search
@@ -60,6 +61,16 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name, global_months=None):
 
     # Find Append Position
     last_row = master_ws.UsedRange.Rows.Count
+    
+    # Check if this account block already exists in the master sheet
+    try:
+        found = master_ws.Columns(3).Find(What=sheet_name, LookAt=1) # xlWhole
+        if found:
+            print(f"  [Skip] Block '{sheet_name}' already exists in {master_ws.Name}")
+            return
+    except:
+        pass
+
     current_row = 2 if (last_row <= 1 and master_ws.Cells(1, 1).Value is None) else last_row + 3
 
     # Title
@@ -144,8 +155,16 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name, global_months=None):
         header_range.Font.Bold = True
         current_row += 1
 
-        data_start_row = current_row
         # Bulk write items for this category
+        data_start_row = current_row
+        
+        # Multiply DR/CR values by 100,000 before bulk write
+        for r in ordered_items:
+            if dr_idx is not None and len(r) > dr_idx:
+                r[dr_idx] = to_number(r[dr_idx]) * 100000
+            if cr_idx is not None and len(r) > cr_idx:
+                r[cr_idx] = to_number(r[cr_idx]) * 100000
+
         data_range = master_ws.Range(master_ws.Cells(current_row, 1), master_ws.Cells(current_row + len(ordered_items) - 1, len(headers)))
         data_range.Value = ordered_items
         
@@ -198,9 +217,9 @@ def process_bank_fin_block(master_ws, temp_ws, sheet_name, global_months=None):
         master_ws.Range(master_ws.Cells(account_start_row, 1), master_ws.Cells(account_end_row, len(headers))).Borders.LineStyle = 1
         
         if dr_idx is not None:
-            master_ws.Range(master_ws.Cells(account_start_row, dr_idx + 1), master_ws.Cells(account_end_row, dr_idx + 1)).NumberFormat = '_(* #,##,##0_);_(* (#,##,##0);_(* "-"_);_(@_)'
+            master_ws.Range(master_ws.Cells(account_start_row, dr_idx + 1), master_ws.Cells(account_end_row, dr_idx + 1)).NumberFormat = '_(* #,##,##0.00_);_(* (#,##,##0.00);_(* "-"_);_(@_)'
         if cr_idx is not None:
-            master_ws.Range(master_ws.Cells(account_start_row, cr_idx + 1), master_ws.Cells(account_end_row, cr_idx + 1)).NumberFormat = '_(* #,##,##0_);_(* (#,##,##0);_(* "-"_);_(@_)'
+            master_ws.Range(master_ws.Cells(account_start_row, cr_idx + 1), master_ws.Cells(account_end_row, cr_idx + 1)).NumberFormat = '_(* #,##,##0.00_);_(* (#,##,##0.00);_(* "-"_);_(@_)'
     except:
         pass
 
@@ -404,6 +423,16 @@ def create_chart_from_pivot(file_path):
                         t_rows, t_cols = t_range.Rows.Count, t_range.Columns.Count
 
                         last_m_row = master_ws.Cells(master_ws.Rows.Count, 1).End(-4162).Row
+                        
+                        # Check if this account block already exists in the master sheet
+                        try:
+                            found = master_ws.Columns(3).Find(What=match_suffix, LookAt=1) # xlWhole
+                            if found:
+                                print(f"  [Skip] Block '{match_suffix}' already exists in {master_ws.Name}")
+                                continue
+                        except:
+                            pass
+
                         # Excel 2007 Check for empty sheet
                         paste_row = 2 if (last_m_row == 1 and master_ws.Cells(1, 1).Value is None) else last_m_row + 3
 
@@ -434,13 +463,22 @@ def create_chart_from_pivot(file_path):
                         rows_data = [list(r) for r in raw_data]
                         
                         # Identify indices from header values
-                        date_idx = cat_idx = None
+                        date_idx = cat_idx = dr_idx = cr_idx = None
                         if h_vals:
                             for idx, h in enumerate(h_vals):
                                 if h:
                                     h_str = str(h).upper().strip()
                                     if "DATE" in h_str: date_idx = idx
                                     if h_str in ("TYPE", "CATEGORY", "CATEG", "CATG", "CAT", "PARTICULARS", "DESCRIPTION", "DESC"): cat_idx = idx
+                                    if h_str == "DR": dr_idx = idx
+                                    if h_str == "CR": cr_idx = idx
+                        
+                        # Multiply DR/CR values by 100,000
+                        for row in rows_data:
+                            if dr_idx is not None and len(row) > dr_idx:
+                                row[dr_idx] = to_number(row[dr_idx]) * 100000
+                            if cr_idx is not None and len(row) > cr_idx:
+                                row[cr_idx] = to_number(row[cr_idx]) * 100000
                         
                         def robust_sort_key(row):
                             # Normalize Date to float for safe comparison with both datetime and numeric Excel dates
@@ -476,7 +514,7 @@ def create_chart_from_pivot(file_path):
                             if "DATE" in h_str:
                                 target_col_range.NumberFormat = "dd-mm-yyyy"
                             elif h_str in ("DR", "CR"):
-                                target_col_range.NumberFormat = '_(* #,##,##0_);_(* (#,##,##0);_(* "-"_);_(@_)'
+                                target_col_range.NumberFormat = '_(* #,##,##0.00_);_(* (#,##,##0.00);_(* "-"_);_(@_)'
                     except Exception as e:
                         print(f"  [Chart Error] Failed for {match_suffix}: {e}")
 
@@ -492,12 +530,25 @@ def create_chart_from_pivot(file_path):
             except:
                 pass
                 
-        # Force all sheet names across the workbook to be UPPERCASE
+        # Force all sheet names across the workbook to be UPPERCASE and remove junk sheets
+        to_delete = []
         for ws in wb.Worksheets:
             try:
-                ws.Name = str(ws.Name).upper()
+                name_upper = str(ws.Name).upper()
+                ws.Name = name_upper
+                # Identify empty/junk sheets like SHEET1, SHEET2
+                if re.match(r"^SHEET\d+$", name_upper):
+                    to_delete.append(ws)
             except:
                 pass
+        
+        if to_delete:
+            excel.DisplayAlerts = False
+            for ws in to_delete:
+                try: ws.Delete()
+                except: pass
+            excel.DisplayAlerts = True
+
                 
         wb.Save()
         print("Charts created successfully.")

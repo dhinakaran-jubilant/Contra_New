@@ -12,7 +12,7 @@ from api.helpers import (
     count_inb_matches, count_return_matches, extract_bank_name_from_sheet,
     find_limit, extract_account_details_from_analysis, create_account_map_from_details,
     extract_account_suffix_from_sheet_name, get_acc_type, get_downloads,
-    format_category_counts
+    format_category_counts, sanitize_filename
 )
 from api import config
 from api.contra_match import compare_files
@@ -497,7 +497,8 @@ class MatchStatement(APIView):
                 bank_code    = info.get('bank_code')
                 full_bank    = _get_bank_name(bank_code, use_code=True) if bank_code else info.get('bank_name', 'Unknown Bank')
                 empty_count  = _count_empty_type(df)
-                file_name =f"{acc_name}-{account_suffix}-WORKING"
+                safe_acc_name = sanitize_filename(acc_name)
+                file_name = f"{safe_acc_name}-{account_suffix}-WORKING"
                 summary_report.append({
                     "User Name": user_info.upper(),
                     "Bank Name": full_bank,
@@ -991,6 +992,16 @@ class DownloadFileView(APIView):
                 )
 
             file_name    = os.path.basename(file_path)
+
+            # If this is a consolidated file, trigger Google Sheets update asynchronously
+            if "-CONSOLIDATED" in file_name.upper():
+                try:
+                    import threading
+                    from api.update_sheet import update_google_sheets_final
+                    print(f"🚀 Triggering ASYNC Google Sheets update for: {file_name}")
+                    threading.Thread(target=update_google_sheets_final, args=(str(file_path),), daemon=True).start()
+                except Exception as gs_err:
+                    print(f"⚠️ Failed to trigger async GS update: {gs_err}")
             content_type, _ = mimetypes.guess_type(file_path)
             content_type = content_type or 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 

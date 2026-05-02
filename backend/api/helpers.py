@@ -90,14 +90,12 @@ def get_downloads() -> Path:
 
 def get_sheet_name(df):
     """Return (sheet_name, account_holder_name) from an Analysis sheet DataFrame."""
-    global account_type
     wanted = ["Name of the Account Holder", "Name of the Bank", "Account Number", "Account Type"]
     sub  = df[df[1].isin(wanted)]
     info = dict(zip(sub[1], sub[2]))
 
     account_number = str(info['Account Number']).strip()
     last_4_digits  = account_number[-4:] if len(account_number) >= 4 else account_number
-    account_type   = info['Account Type']
     bank_code      = _bank_code_from_name(info['Name of the Bank'])
     sheet_name     = f"XNS-{bank_code}-{last_4_digits}"
     return sheet_name, info["Name of the Account Holder"]
@@ -110,14 +108,10 @@ def get_multiple_sheet_name(df):
 
 def get_month_values(df, date_col):
     temp = pd.DataFrame()
-    temp['DATE']       = pd.to_datetime(df[date_col], errors='coerce')
-    temp['M_NAME']     = temp['DATE'].dt.strftime("%b").str.upper()
-    temp['YEAR']       = temp['DATE'].dt.year
-    temp['Y_SHORT']    = temp['DATE'].dt.strftime("%y")
-    temp['MAX_YEAR']   = temp.groupby('M_NAME')['YEAR'].transform('max')
-    temp['YEAR_COUNT'] = temp.groupby('M_NAME')['YEAR'].transform('nunique')
-    mask = (temp['YEAR_COUNT'] > 1) & (temp['YEAR'] == temp['MAX_YEAR'])
-    return np.where(mask, temp['M_NAME'] + " (" + temp['Y_SHORT'] + ")", temp['M_NAME'])
+    temp['DATE']    = pd.to_datetime(df[date_col], errors='coerce')
+    temp['M_NAME']  = temp['DATE'].dt.strftime("%b").str.upper()
+    temp['Y_SHORT'] = temp['DATE'].dt.strftime("%y")
+    return temp['M_NAME'] + "(" + temp['Y_SHORT'] + ")"
 
 
 def preprocess_category(category):
