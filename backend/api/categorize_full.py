@@ -106,10 +106,8 @@ def categorize_desc_text_row(desc, category, cr=None, dr=None):
     has_upi = bool(RE_UPI.search(desc_str))
 
     # --- Re-categorization rules ---
-    if cat_str in ('ENTERTAINMENT', 'CLOTHING', 'PERSONAL CARE', 'FOOD', 'ALCOHOL', 'CASH BACK', 'LOGISTICS', 'MEDICAL', 'SUBSIDY', 'VEHICLE SERVICING'):
+    if cat_str in ('ENTERTAINMENT', 'CLOTHING', 'PERSONAL CARE', 'FOOD', 'ALCOHOL', 'CASH BACK', 'LOGISTICS', 'MEDICAL', 'SUBSIDY', 'VEHICLE SERVICING', 'FUEL', 'TRAVEL', 'UTILITIES'):
         return cat_str
-    elif cat_str in ('FUEL', 'TRAVEL', 'UTILITIES'):
-        return 'EXPENSE'
     
     if cat_str == 'REVERSAL' and not has_neft and not has_rtgs: return 'REVERSAL'
 
@@ -409,7 +407,7 @@ def categorize_type(df, type_value, acc_type):
     df.loc[cat_upper == 'REVERSAL', 'TYPE'] = 'REVERSAL'
     df.loc[cat_upper == 'INSURANCE', 'TYPE'] = 'INSURANCE'
     expense_cats = {'BANK CHARGES', 'TAX', 'PENAL CHARGES', 'EPFO', 'ADVANCE SALARY PAID', 'EB BILL', 'RENT', 
-                    'PF WITHDRAWAL', 'BELOW MIN BALANCE', 'SALARY PAID', 'UTILITIES', 'FUEL', 'TRAVEL', 'EXPENSE'}
+                    'PF WITHDRAWAL', 'BELOW MIN BALANCE', 'SALARY PAID', 'UTILITIES', 'FUEL', 'TRAVEL'}
     df.loc[cat_upper.isin(expense_cats), 'TYPE'] = 'EXPENSE'
     df.loc[df['Category'].isin(['ESIC', 'ESI']), 'TYPE'] = 'INSURANCE'
     df.loc[df['Category'].isin(['CREDIT CARD PAYMENT', 'ONLINE SHOPPING']), 'TYPE'] = 'PURCHASE'
