@@ -473,12 +473,11 @@ def create_chart_from_pivot(file_path):
                                     if h_str == "DR": dr_idx = idx
                                     if h_str == "CR": cr_idx = idx
                         
-                        # Multiply DR/CR values by 100,000
-                        for row in rows_data:
-                            if dr_idx is not None and len(row) > dr_idx:
-                                row[dr_idx] = to_number(row[dr_idx]) * 100000
-                            if cr_idx is not None and len(row) > cr_idx:
-                                row[cr_idx] = to_number(row[cr_idx]) * 100000
+                        for r in rows_data:
+                            if dr_idx is not None and len(r) > dr_idx:
+                                r[dr_idx] = to_number(r[dr_idx])
+                            if cr_idx is not None and len(r) > cr_idx:
+                                r[cr_idx] = to_number(r[cr_idx])
                         
                         def robust_sort_key(row):
                             # Normalize Date to float for safe comparison with both datetime and numeric Excel dates
